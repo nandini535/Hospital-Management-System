@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pharmacy Medicines Inventory - Admin Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Pharmacy Medicine Inventory</h1>
+        <p class="page-subtitle">Manage medication stock levels, pricing, and monitor inventory shortages</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-primary" onclick="openAddMedModal()">+ Add New Medicine</button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Controls Bar -->
+    <div class="card">
+      <div class="card-body" style="padding: 0.75rem 1.15rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+          <div style="max-width: 320px; width: 100%;">
+            <input type="text" id="medSearch" class="form-control" placeholder="Search medicines by name..." oninput="filterMedicines()">
+          </div>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <input type="checkbox" id="lowStockOnly" onchange="filterMedicines()">
+            <label for="lowStockOnly" style="margin: 0; cursor: pointer; font-size: 0.85rem;">Show Low Stock Only (&le; 20 units)</label>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="loadMedicines()">🔄 Refresh</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Medicines Table Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Medication Catalog</h2>
+        <span id="medCountBadge" style="font-size:0.85rem; color:var(--text-muted);">Loading...</span>
+      </div>
+      <div class="card-body" id="medicinesContainer" style="padding: 0;">
+        <p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading medicines...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add / Edit Medicine Modal -->
+  <div class="modal-backdrop" id="medModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="medModalTitle">Add Medicine</h3>
+        <button type="button" class="modal-close" onclick="closeMedModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="modalAlertBox"></div>
+        <form id="medForm" onsubmit="handleSaveMedicine(event)">
+          <div class="form-group">
+            <label class="form-label" for="medName">Medicine Name <span class="required">*</span></label>
+            <input type="text" id="medName" class="form-control" placeholder="e.g. Amoxicillin 500mg" required>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="medPrice">Unit Price (₹) <span class="required">*</span></label>
+              <input type="number" id="medPrice" class="form-control" step="0.5" min="0" placeholder="e.g. 45.00" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="medStock">Available Stock (Units) <span class="required">*</span></label>
+              <input type="number" id="medStock" class="form-control" min="0" placeholder="e.g. 100" required>
+            </div>
+          </div>
+
+          <div class="modal-footer" style="padding-right:0; padding-bottom:0; margin-top:1.25rem;">
+            <button type="button" class="btn btn-secondary" onclick="closeMedModal()">Cancel</button>
+            <button type="submit" id="saveMedBtn" class="btn btn-primary">Save Medicine</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    let medicines = [];
+    let editingMedId = null;
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Admin')) return;
+      renderNavbar('medicines');
+      await loadMedicines();
+    });
+
+    async function loadMedicines() {
+      clearMessage('alertBox');
+      const container = document.getElementById('medicinesContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading inventory...</p>';
+
+      try {
+        medicines = await apiFetch('/api/medicines');
+        filterMedicines();
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Unable to fetch medicines catalog: ' + err.message);
+        container.innerHTML = '<p style="color: var(--error); padding: 2rem; text-align: center;">Error loading inventory.</p>';
+      }
+    }
+
+    function filterMedicines() {
+      const q = document.getElementById('medSearch').value.toLowerCase().trim();
+      const lowOnly = document.getElementById('lowStockOnly').checked;
+
+      let filtered = medicines;
+      if (lowOnly) {
+        filtered = filtered.filter(m => (m.Stock || 0) <= 20);
+      }
+      if (q) {
+        filtered = filtered.filter(m => m.Name && m.Name.toLowerCase().includes(q));
+      }
+
+      document.getElementById('medCountBadge').textContent = `Showing ${filtered.length} of ${medicines.length} items`;
+      renderMedicinesTable(filtered);
+    }
+
+    function renderMedicinesTable(list) {
+      const container = document.getElementById('medicinesContainer');
+
+      const columns = [
+        { label: 'Medicine ID', render: (_, r) => `<strong>#${r.MedicineID}</strong>` },
+        { label: 'Name', render: (_, r) => `<strong>💊 ${escapeHtml(r.Name)}</strong>` },
+        { label: 'Unit Price', render: (_, r) => formatCurrency(r.Price) },
+        {
+          label: 'Inventory Stock',
+          render: (_, r) => {
+            const isLow = (r.Stock || 0) <= 20;
+            return `
+              <span style="font-weight: 700; color: ${isLow ? 'var(--error)' : 'var(--text-main)'};">
+                ${r.Stock} units
+              </span>
+              ${isLow ? '<span class="badge badge-cancelled" style="margin-left:0.4rem;">Low Stock</span>' : ''}
+            `;
+          }
+        },
+        {
+          label: 'Action',
+          render: (_, r) => `
+            <button type="button" class="btn btn-outline btn-sm" onclick="openEditMedModal(${JSON.stringify(r).replace(/"/g, '&quot;')})">
+              Edit
+            </button>
+          `
+        }
+      ];
+
+      container.innerHTML = renderTable(columns, list, { emptyText: 'No matching medicines found.' });
+    }
+
+    function openAddMedModal() {
+      editingMedId = null;
+      clearMessage('modalAlertBox');
+      document.getElementById('medModalTitle').textContent = 'Add New Medicine';
+      document.getElementById('medForm').reset();
+      document.getElementById('medModal').classList.add('show');
+    }
+
+    function openEditMedModal(med) {
+      editingMedId = med.MedicineID;
+      clearMessage('modalAlertBox');
+      document.getElementById('medModalTitle').textContent = `Edit Medicine: ${med.Name} (#${med.MedicineID})`;
+      document.getElementById('medName').value = med.Name || '';
+      document.getElementById('medPrice').value = med.Price || 0;
+      document.getElementById('medStock').value = med.Stock || 0;
+      document.getElementById('medModal').classList.add('show');
+    }
+
+    function closeMedModal() {
+      editingMedId = null;
+      document.getElementById('medModal').classList.remove('show');
+    }
+
+    async function handleSaveMedicine(e) {
+      e.preventDefault();
+      clearMessage('modalAlertBox');
+
+      const name = document.getElementById('medName').value.trim();
+      const price = parseFloat(document.getElementById('medPrice').value);
+      const stock = parseInt(document.getElementById('medStock').value, 10);
+      const saveBtn = document.getElementById('saveMedBtn');
+
+      if (!name || isNaN(price) || isNaN(stock)) {
+        showMessage('modalAlertBox', 'warning', 'Please provide valid name, price, and stock.');
+        return;
+      }
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      try {
+        const payload = { Name: name, Price: price, Stock: stock };
+
+        if (editingMedId) {
+          // Update existing medicine
+          await apiFetch(`/api/medicines/${editingMedId}`, {
+            method: 'PUT',
+            body: payload
+          });
+          showMessage('alertBox', 'success', `Medicine "${name}" updated successfully.`);
+        } else {
+          // Create new medicine
+          const res = await apiFetch('/api/medicines', {
+            method: 'POST',
+            body: payload
+          });
+          showMessage('alertBox', 'success', `Medicine "${name}" added successfully! (ID: #${res.MedicineID || ''})`);
+        }
+
+        closeMedModal();
+        await loadMedicines();
+      } catch (err) {
+        showMessage('modalAlertBox', 'error', err.message || 'Failed to save medicine.');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Medicine';
+      }
+    }
+  </script>
+</body>
+</html>

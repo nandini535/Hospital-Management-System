@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hospital Billing & Collections - Admin Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Hospital Billing & Cashier Desk</h1>
+        <p class="page-subtitle">Track patient billing records, outstanding balances, and mark invoices as settled</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="loadBills()">🔄 Refresh</button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Revenue Overview Cards -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Total Invoices</div>
+        <div class="stat-value" id="statTotalInvoices">-</div>
+        <div class="stat-subtext">Issued bills</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Revenue Collected</div>
+        <div class="stat-value" id="statCollected" style="color: var(--success);">-</div>
+        <div class="stat-subtext">Settled payments</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Pending Receivables</div>
+        <div class="stat-value" id="statReceivables" style="color: var(--error);">-</div>
+        <div class="stat-subtext" id="statPendingCount">Outstanding bills</div>
+      </div>
+    </div>
+
+    <!-- Filter Bar Card -->
+    <div class="card">
+      <div class="card-body" style="padding: 0.75rem 1.15rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <label for="statusFilter" class="form-label" style="margin: 0; white-space: nowrap;">Status Filter:</label>
+            <select id="statusFilter" class="form-control" style="width: 170px;" onchange="filterBills()">
+              <option value="ALL">All Bills</option>
+              <option value="Pending" selected>Pending Payment</option>
+              <option value="Paid">Paid / Settled</option>
+            </select>
+          </div>
+          <div style="font-size: 0.85rem; color: var(--text-muted);" id="billsCountDisplay">
+            Loading...
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bills Table Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Billing Ledger</h2>
+      </div>
+      <div class="card-body" id="billsTableContainer" style="padding: 0;">
+        <p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading bills...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    let allBills = [];
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Admin')) return;
+      renderNavbar('billing');
+      await loadBills();
+    });
+
+    async function loadBills() {
+      clearMessage('alertBox');
+      const container = document.getElementById('billsTableContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading ledger...</p>';
+
+      try {
+        allBills = await apiFetch('/api/bills');
+
+        // Calculate statistics
+        const totalCount = allBills.length;
+        const paidBills = allBills.filter(b => b.Status === 'Paid');
+        const pendingBills = allBills.filter(b => b.Status === 'Pending');
+
+        const totalPaid = paidBills.reduce((s, b) => s + (parseFloat(b.Amount) || 0), 0);
+        const totalPending = pendingBills.reduce((s, b) => s + (parseFloat(b.Amount) || 0), 0);
+
+        document.getElementById('statTotalInvoices').textContent = totalCount;
+        document.getElementById('statCollected').textContent = formatCurrency(totalPaid);
+        document.getElementById('statReceivables').textContent = formatCurrency(totalPending);
+        document.getElementById('statPendingCount').textContent = `${pendingBills.length} unpaid bill(s)`;
+
+        filterBills();
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Failed to fetch bills: ' + err.message);
+        container.innerHTML = '<p style="color: var(--error); padding: 2rem; text-align: center;">Error loading bills.</p>';
+      }
+    }
+
+    function filterBills() {
+      const filter = document.getElementById('statusFilter').value;
+      const filtered = filter === 'ALL'
+        ? allBills
+        : allBills.filter(b => b.Status === filter);
+
+      document.getElementById('billsCountDisplay').textContent = `Showing ${filtered.length} of ${allBills.length} total bills`;
+      renderBillsTable(filtered);
+    }
+
+    function renderBillsTable(list) {
+      const container = document.getElementById('billsTableContainer');
+
+      const columns = [
+        { label: 'Bill ID', render: (_, r) => `<strong>#${r.BillID}</strong>` },
+        { label: 'Patient ID', render: (_, r) => `<strong>👤 Patient #${r.PatientID}</strong>` },
+        {
+          label: 'Service Source',
+          render: (_, r) => r.AdmissionID
+            ? `🏥 Admission #${r.AdmissionID}`
+            : (r.AppointmentID ? `📅 Consultation #${r.AppointmentID}` : 'General')
+        },
+        { label: 'Billing Date', render: (_, r) => formatDate(r.Date) },
+        { label: 'Amount', render: (_, r) => `<strong>${formatCurrency(r.Amount)}</strong>` },
+        { label: 'Payment Mode', render: (_, r) => r.PaymentMode ? `<span style="font-size:0.85rem;">💳 ${escapeHtml(r.PaymentMode)}</span>` : '<span style="color:var(--text-muted);">-</span>' },
+        { label: 'Status', render: (_, r) => statusBadge(r.Status) },
+        {
+          label: 'Cashier Action',
+          render: (_, r) => {
+            if (r.Status === 'Pending') {
+              return `
+                <button type="button" class="btn btn-success btn-sm" onclick="markBillPaid(${r.BillID}, ${r.Amount})">
+                  ✓ Mark as Paid
+                </button>
+              `;
+            }
+            return '<span style="color:var(--success); font-size:0.85rem; font-weight:600;">✓ Settled</span>';
+          }
+        }
+      ];
+
+      container.innerHTML = renderTable(columns, list, { emptyText: 'No billing records found.' });
+    }
+
+    async function markBillPaid(bid, amount) {
+      if (!confirm(`Confirm payment settlement of ${formatCurrency(amount)} for Bill #${bid}?`)) {
+        return;
+      }
+
+      clearMessage('alertBox');
+      try {
+        const res = await apiFetch(`/api/bills/${bid}/pay`, {
+          method: 'POST'
+        });
+
+        showMessage('alertBox', 'success', res.message || `Bill #${bid} marked as Paid.`);
+        await loadBills();
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || 'Failed to mark bill as paid.');
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hospital Admissions & Bed Management - Admin Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Inpatient Admissions & Room Allocation</h1>
+        <p class="page-subtitle">Assign available hospital rooms, record patient discharges, and generate inpatient bills</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="loadAllData()">🔄 Refresh</button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Bill Breakdown Result Banner -->
+    <div id="billBreakdownContainer"></div>
+
+    <div class="form-row">
+      <!-- Admit Patient Form Card -->
+      <div class="card" style="flex: 2; min-width: 320px;">
+        <div class="card-header">
+          <h2 class="card-title">+ Inpatient Admission Intake</h2>
+        </div>
+        <div class="card-body">
+          <form id="admitForm" onsubmit="handleAdmitPatient(event)">
+            <div class="form-group">
+              <label class="form-label" for="admitPatient">Select Patient <span class="required">*</span></label>
+              <select id="admitPatient" class="form-control" required>
+                <option value="">Loading patients...</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="admitRoom">Select Available Room <span class="required">*</span></label>
+              <select id="admitRoom" class="form-control" required>
+                <option value="">Loading available rooms...</option>
+              </select>
+              <div class="form-help">Only rooms with status 'Available' are shown. Room is locked transactionally.</div>
+            </div>
+
+            <div style="margin-top: 1.25rem;">
+              <button type="submit" id="admitBtn" class="btn btn-primary">
+                Admit Patient to Room
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Free Rooms Summary Card -->
+      <div class="card" style="flex: 1; min-width: 260px;">
+        <div class="card-header">
+          <h2 class="card-title">Available Beds Snapshot</h2>
+          <span class="badge badge-available" id="freeRoomsCount">0 Available</span>
+        </div>
+        <div class="card-body" id="freeRoomsList" style="max-height: 220px; overflow-y: auto; font-size: 0.85rem;">
+          <p style="color: var(--text-muted);">Loading rooms...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Admissions Census Table Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Hospital Admissions Census</h2>
+      </div>
+      <div class="card-body" id="admissionsTableContainer" style="padding: 0;">
+        <p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading admissions...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generate Bill Modal -->
+  <div class="modal-backdrop" id="admitBillModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Generate Inpatient Discharge Bill</h3>
+        <button type="button" class="modal-close" onclick="closeAdmitBillModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="modalBillAlert"></div>
+
+        <div style="background: #f8fafc; padding: 0.85rem; border-radius: var(--radius-sm); margin-bottom: 1rem; border: 1px solid var(--border-color); font-size: 0.85rem;">
+          <div><strong>Admission ID:</strong> <span id="modalAdmId">-</span></div>
+          <div><strong>Patient ID:</strong> <span id="modalAdmPatientId">-</span></div>
+          <div style="margin-top: 0.4rem; color: var(--secondary);">
+            The bill automatically calculates daily room tariff for total stay days plus pharmacy medication items consumed during the hospital stay.
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="admitPaymentMode">Payment Mode</label>
+          <select id="admitPaymentMode" class="form-control">
+            <option value="Cash" selected>Cash</option>
+            <option value="Card">Card</option>
+            <option value="UPI">UPI</option>
+            <option value="Insurance">Health Insurance TPA</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeAdmitBillModal()">Cancel</button>
+        <button type="button" id="confirmAdmitBillBtn" class="btn btn-primary" onclick="submitAdmitBill()">
+          Calculate & Generate Bill
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    let availableRooms = [];
+    let currentAdmForBill = null;
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Admin')) return;
+      renderNavbar('admissions');
+      await loadAllData();
+    });
+
+    async function loadAllData() {
+      clearMessage('alertBox');
+      await Promise.all([loadPatients(), loadAvailableRooms(), loadAdmissions()]);
+    }
+
+    async function loadPatients() {
+      const select = document.getElementById('admitPatient');
+      try {
+        const patients = await apiFetch('/api/patients');
+        select.innerHTML = '<option value="">-- Choose Patient --</option>' +
+          patients.map(p => `<option value="${p.PatientID}">${escapeHtml(p.Name)} (ID: #${p.PatientID})</option>`).join('');
+      } catch (e) {
+        select.innerHTML = '<option value="">Failed to load patients</option>';
+      }
+    }
+
+    async function loadAvailableRooms() {
+      const select = document.getElementById('admitRoom');
+      const countBadge = document.getElementById('freeRoomsCount');
+      const listDiv = document.getElementById('freeRoomsList');
+
+      try {
+        availableRooms = await apiFetch('/api/rooms/available');
+        countBadge.textContent = `${availableRooms.length} Available`;
+
+        if (availableRooms.length === 0) {
+          select.innerHTML = '<option value="">No rooms currently available</option>';
+          listDiv.innerHTML = '<p style="color:var(--error);">All rooms currently occupied.</p>';
+          return;
+        }
+
+        select.innerHTML = '<option value="">-- Choose Room --</option>' +
+          availableRooms.map(r =>
+            `<option value="${r.RoomID}">Room #${r.RoomID} - ${escapeHtml(r.WardName)} (${escapeHtml(r.Type)} - ₹${r.Charge}/day)</option>`
+          ).join('');
+
+        listDiv.innerHTML = availableRooms.map(r => `
+          <div style="padding: 0.35rem 0; border-bottom: 1px solid var(--border-color); display:flex; justify-content:space-between;">
+            <span>Room #${r.RoomID} (${escapeHtml(r.WardName)})</span>
+            <strong>${formatCurrency(r.Charge)}/d</strong>
+          </div>
+        `).join('');
+      } catch (e) {
+        select.innerHTML = '<option value="">Error loading rooms</option>';
+        listDiv.innerHTML = '<p style="color:var(--error);">Failed to load rooms.</p>';
+      }
+    }
+
+    async function handleAdmitPatient(e) {
+      e.preventDefault();
+      clearMessage('alertBox');
+
+      const pid = document.getElementById('admitPatient').value;
+      const rid = document.getElementById('admitRoom').value;
+      const admitBtn = document.getElementById('admitBtn');
+
+      if (!pid || !rid) {
+        showMessage('alertBox', 'warning', 'Please choose both a patient and an available room.');
+        return;
+      }
+
+      admitBtn.disabled = true;
+      admitBtn.textContent = 'Admitting...';
+
+      try {
+        const res = await apiFetch('/api/admit', {
+          method: 'POST',
+          body: {
+            PatientID: parseInt(pid, 10),
+            RoomID: parseInt(rid, 10)
+          }
+        });
+
+        showMessage('alertBox', 'success', `Patient successfully admitted to Room #${rid}! (Admission ID: #${res.AdmissionID})`);
+        document.getElementById('admitForm').reset();
+        await loadAllData();
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || 'Failed to admit patient.');
+      } finally {
+        admitBtn.disabled = false;
+        admitBtn.textContent = 'Admit Patient to Room';
+      }
+    }
+
+    async function loadAdmissions() {
+      const container = document.getElementById('admissionsTableContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading admissions census...</p>';
+
+      try {
+        const admissions = await apiFetch('/api/admissions');
+
+        const columns = [
+          { label: 'Admission ID', render: (_, r) => `<strong>#${r.AdmissionID}</strong>` },
+          { label: 'Patient ID', render: (_, r) => `<strong>Patient #${r.PatientID}</strong>` },
+          { label: 'Room ID', render: (_, r) => `Room #${r.RoomID}` },
+          { label: 'Admit Date', render: (_, r) => formatDate(r.AdmitDate) },
+          {
+            label: 'Discharge Date',
+            render: (_, r) => r.DischargeDate
+              ? formatDate(r.DischargeDate)
+              : '<span class="badge badge-active">Inpatient (Active)</span>'
+          },
+          {
+            label: 'Status & Actions',
+            render: (_, r) => {
+              if (!r.DischargeDate) {
+                return `
+                  <button type="button" class="btn btn-danger btn-sm" onclick="dischargePatient(${r.AdmissionID})">
+                    Discharge Patient
+                  </button>
+                `;
+              }
+              return `
+                <div class="btn-group">
+                  <span class="badge badge-completed" style="margin-right:0.4rem;">Discharged</span>
+                  <button type="button" class="btn btn-outline btn-sm" onclick="openAdmitBillModal(${r.AdmissionID}, ${r.PatientID})">
+                    🧾 Generate Bill
+                  </button>
+                </div>
+              `;
+            }
+          }
+        ];
+
+        container.innerHTML = renderTable(columns, admissions, { emptyText: 'No admissions on record.' });
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Unable to fetch admissions: ' + err.message);
+        container.innerHTML = '<p style="color: var(--error); padding: 2rem; text-align: center;">Error loading admissions.</p>';
+      }
+    }
+
+    async function dischargePatient(aid) {
+      if (!confirm(`Confirm discharge for Admission #${aid}? This will mark the room Available.`)) {
+        return;
+      }
+
+      clearMessage('alertBox');
+      try {
+        const res = await apiFetch(`/api/admissions/${aid}/discharge`, {
+          method: 'POST'
+        });
+
+        showMessage('alertBox', 'success', `Patient successfully discharged! You can now generate the inpatient bill.`);
+        await loadAllData();
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || 'Failed to discharge patient.');
+      }
+    }
+
+    function openAdmitBillModal(aid, pid) {
+      currentAdmForBill = aid;
+      clearMessage('modalBillAlert');
+
+      document.getElementById('modalAdmId').textContent = '#' + aid;
+      document.getElementById('modalAdmPatientId').textContent = '#' + pid;
+
+      document.getElementById('admitBillModal').classList.add('show');
+    }
+
+    function closeAdmitBillModal() {
+      currentAdmForBill = null;
+      document.getElementById('admitBillModal').classList.remove('show');
+    }
+
+    async function submitAdmitBill() {
+      if (!currentAdmForBill) return;
+      clearMessage('modalBillAlert');
+
+      const mode = document.getElementById('admitPaymentMode').value;
+      const btn = document.getElementById('confirmAdmitBillBtn');
+      btn.disabled = true;
+      btn.textContent = 'Calculating...';
+
+      try {
+        const bill = await apiFetch(`/api/admissions/${currentAdmForBill}/generate-bill`, {
+          method: 'POST',
+          body: { PaymentMode: mode }
+        });
+
+        closeAdmitBillModal();
+
+        // Render detailed breakdown banner
+        const breakdownDiv = document.getElementById('billBreakdownContainer');
+        breakdownDiv.innerHTML = `
+          <div class="card" style="border: 2px solid var(--success); margin-bottom: 1.25rem;">
+            <div class="card-header" style="background: var(--success-bg); color: var(--success);">
+              <h3 class="card-title">✓ Inpatient Bill #${bill.BillID} Generated Successfully</h3>
+            </div>
+            <div class="card-body">
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem;">
+                <div>
+                  <div style="color:var(--text-muted); font-size:0.8rem;">Hospital Stay Duration</div>
+                  <strong style="font-size:1.1rem;">${bill.days} Day(s)</strong>
+                </div>
+                <div>
+                  <div style="color:var(--text-muted); font-size:0.8rem;">Room Charges</div>
+                  <strong style="font-size:1.1rem;">${formatCurrency(bill.room_charges)}</strong>
+                </div>
+                <div>
+                  <div style="color:var(--text-muted); font-size:0.8rem;">Pharmacy Medicines</div>
+                  <strong style="font-size:1.1rem;">${formatCurrency(bill.medicine_charges)}</strong>
+                </div>
+                <div>
+                  <div style="color:var(--text-muted); font-size:0.8rem;">Total Bill Amount</div>
+                  <strong style="font-size:1.25rem; color:var(--primary);">${formatCurrency(bill.total)}</strong>
+                </div>
+              </div>
+              <div style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--secondary);">
+                Status is marked as <strong>Pending</strong>. Settle payment in the <a href="billing.html">Billing Module</a>.
+              </div>
+            </div>
+          </div>
+        `;
+
+        showMessage('alertBox', 'success', `Bill #${bill.BillID} created. Total amount: ${formatCurrency(bill.total)}`);
+        breakdownDiv.scrollIntoView({ behavior: 'smooth' });
+        await loadAdmissions();
+      } catch (err) {
+        showMessage('modalBillAlert', 'error', err.message || 'Failed to generate admission bill.');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Calculate & Generate Bill';
+      }
+    }
+  </script>
+</body>
+</html>

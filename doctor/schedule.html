@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Doctor Timetable & Schedule</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Weekly Consultation Timetable</h1>
+        <p class="page-subtitle">Configure your available days, operating hours, and appointment slot durations</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-primary" onclick="saveSchedule()">
+          💾 Save Timetable
+        </button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Weekly Schedule Slots</h2>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="addScheduleRow()">
+          + Add Time Window
+        </button>
+      </div>
+      <div class="card-body">
+        <p style="font-size: 0.825rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Patients can only book appointment slots generated from your active schedule. Ensure each day has a valid start and end time.
+        </p>
+
+        <div class="table-responsive">
+          <table class="table" id="scheduleTable">
+            <thead>
+              <tr>
+                <th style="width: 220px;">Day of Week</th>
+                <th style="width: 180px;">Start Time</th>
+                <th style="width: 180px;">End Time</th>
+                <th style="width: 160px;">Slot Duration</th>
+                <th style="width: 100px;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="scheduleRows">
+              <tr>
+                <td colspan="5" class="table-empty">Loading timetable...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style="margin-top: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="addScheduleRow()">
+            + Add Another Row
+          </button>
+          <button type="button" id="saveBtn" class="btn btn-primary" onclick="saveSchedule()">
+            Save Timetable
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    const DAYS = [
+      { id: 0, name: 'Monday' },
+      { id: 1, name: 'Tuesday' },
+      { id: 2, name: 'Wednesday' },
+      { id: 3, name: 'Thursday' },
+      { id: 4, name: 'Friday' },
+      { id: 5, name: 'Saturday' },
+      { id: 6, name: 'Sunday' }
+    ];
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Doctor')) return;
+      renderNavbar('schedule');
+      await loadSchedule();
+    });
+
+    async function loadSchedule() {
+      clearMessage('alertBox');
+      const tbody = document.getElementById('scheduleRows');
+      tbody.innerHTML = '<tr><td colspan="5" class="table-empty">Loading timetable...</td></tr>';
+
+      try {
+        const rows = await apiFetch('/api/doctor/schedule');
+        tbody.innerHTML = '';
+
+        if (!Array.isArray(rows) || rows.length === 0) {
+          // Add default Monday-Friday 09:00 - 13:00 rows as starter
+          for (let d = 0; d <= 4; d++) {
+            addScheduleRow(d, '09:00', '13:00', 30);
+          }
+          return;
+        }
+
+        rows.forEach(r => {
+          const startTime = r.StartTime ? String(r.StartTime).substring(0, 5) : '09:00';
+          const endTime = r.EndTime ? String(r.EndTime).substring(0, 5) : '13:00';
+          addScheduleRow(r.DayOfWeek, startTime, endTime, r.SlotMinutes || 30);
+        });
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Unable to fetch schedule: ' + err.message);
+        tbody.innerHTML = '<tr><td colspan="5" class="table-empty" style="color:var(--error);">Failed to load schedule.</td></tr>';
+      }
+    }
+
+    function addScheduleRow(dow = 0, start = '09:00', end = '13:00', slotMin = 30) {
+      const tbody = document.getElementById('scheduleRows');
+      const tr = document.createElement('tr');
+
+      const dayOptions = DAYS.map(d =>
+        `<option value="${d.id}" ${Number(dow) === d.id ? 'selected' : ''}>${d.name}</option>`
+      ).join('');
+
+      tr.innerHTML = `
+        <td>
+          <select class="form-control row-day" style="font-weight: 500;">
+            ${dayOptions}
+          </select>
+        </td>
+        <td>
+          <input type="time" class="form-control row-start" value="${escapeHtml(start)}" required>
+        </td>
+        <td>
+          <input type="time" class="form-control row-end" value="${escapeHtml(end)}" required>
+        </td>
+        <td>
+          <select class="form-control row-slot">
+            <option value="15" ${slotMin === 15 ? 'selected' : ''}>15 mins</option>
+            <option value="20" ${slotMin === 20 ? 'selected' : ''}>20 mins</option>
+            <option value="30" ${slotMin === 30 ? 'selected' : ''}>30 mins</option>
+            <option value="45" ${slotMin === 45 ? 'selected' : ''}>45 mins</option>
+            <option value="60" ${slotMin === 60 ? 'selected' : ''}>60 mins</option>
+          </select>
+        </td>
+        <td>
+          <button type="button" class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()">
+            &times; Remove
+          </button>
+        </td>
+      `;
+
+      tbody.appendChild(tr);
+    }
+
+    async function saveSchedule() {
+      clearMessage('alertBox');
+      const trs = document.querySelectorAll('#scheduleRows tr');
+      const list = [];
+
+      for (const tr of trs) {
+        const dayEl = tr.querySelector('.row-day');
+        const startEl = tr.querySelector('.row-start');
+        const endEl = tr.querySelector('.row-end');
+        const slotEl = tr.querySelector('.row-slot');
+
+        if (!dayEl || !startEl || !endEl || !slotEl) continue;
+
+        const dow = parseInt(dayEl.value, 10);
+        const start = startEl.value;
+        const end = endEl.value;
+        const slot = parseInt(slotEl.value, 10);
+
+        if (!start || !end) {
+          showMessage('alertBox', 'error', 'Please provide both Start Time and End Time for all rows.');
+          return;
+        }
+
+        if (end <= start) {
+          showMessage('alertBox', 'error', `End Time (${end}) must be after Start Time (${start}).`);
+          return;
+        }
+
+        list.push({
+          DayOfWeek: dow,
+          StartTime: start,
+          EndTime: end,
+          SlotMinutes: slot
+        });
+      }
+
+      const saveBtn = document.getElementById('saveBtn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      try {
+        const res = await apiFetch('/api/doctor/schedule', {
+          method: 'PUT',
+          body: list
+        });
+
+        showMessage('alertBox', 'success', res.message || `Schedule updated successfully with ${list.length} active time windows.`);
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || 'Failed to update schedule.');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Timetable';
+      }
+    }
+  </script>
+</body>
+</html>

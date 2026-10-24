@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lab Investigations - Doctor Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Laboratory Investigations</h1>
+        <p class="page-subtitle">Order diagnostic tests for your patients and record laboratory pathology findings</p>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <div class="form-row">
+      <!-- Order Lab Test Card -->
+      <div class="card" style="flex: 2; min-width: 300px;">
+        <div class="card-header">
+          <h2 class="card-title">Order Diagnostic Test</h2>
+        </div>
+        <div class="card-body">
+          <form id="orderTestForm" onsubmit="handleOrderTest(event)">
+            <div class="form-group">
+              <label class="form-label" for="testPatient">Select Patient <span class="required">*</span></label>
+              <select id="testPatient" class="form-control" onchange="onPatientSelected()" required>
+                <option value="">Loading patients...</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="testName">Investigation / Test Name <span class="required">*</span></label>
+              <input type="text" id="testName" class="form-control" placeholder="e.g. Complete Blood Count (CBC)" required list="commonTests">
+              <datalist id="commonTests">
+                <option value="Complete Blood Count (CBC)">
+                <option value="Lipid Profile">
+                <option value="Fasting Blood Glucose">
+                <option value="Liver Function Test (LFT)">
+                <option value="Kidney Function Test (KFT)">
+                <option value="Thyroid Profile (T3, T4, TSH)">
+                <option value="Serum Electrolytes">
+                <option value="Urine Routine Examination">
+                <option value="Chest X-Ray (PA View)">
+                <option value="Electrocardiogram (ECG)">
+              </datalist>
+            </div>
+
+            <div style="margin-top: 1.25rem;">
+              <button type="submit" id="orderBtn" class="btn btn-primary btn-block">
+                Order Investigation
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Quick Guidance -->
+      <div class="card" style="flex: 1; min-width: 260px;">
+        <div class="card-header">
+          <h2 class="card-title">Diagnostic Workflow</h2>
+        </div>
+        <div class="card-body" style="font-size: 0.85rem; color: var(--secondary);">
+          <p style="margin-bottom: 0.6rem;">
+            1. Select a patient from your assigned consultation list.
+          </p>
+          <p style="margin-bottom: 0.6rem;">
+            2. Choose from suggested test templates or type any custom diagnostic requirement.
+          </p>
+          <p>
+            3. Once lab findings arrive, click <strong>"Enter Result"</strong> in the patient table below to enter observations.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Patient Tests Table -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title" id="testsTableTitle">Patient Diagnostic Records</h2>
+        <span id="selectedPatientIndicator" style="font-size:0.85rem; color:var(--text-muted);">Select a patient above</span>
+      </div>
+      <div class="card-body" id="patientTestsContainer" style="padding: 0;">
+        <p style="color: var(--text-muted); padding: 2rem; text-align: center;">Please select a patient above to view their diagnostic investigations.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Enter Result Modal -->
+  <div class="modal-backdrop" id="resultModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Record Lab Test Findings</h3>
+        <button type="button" class="modal-close" onclick="closeResultModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="modalAlertBox"></div>
+
+        <div style="background: #f8fafc; padding: 0.75rem; border-radius: var(--radius-sm); margin-bottom: 1rem; border: 1px solid var(--border-color); font-size: 0.85rem;">
+          <div><strong>Test:</strong> <span id="modalTestName">-</span> (ID: <span id="modalTestId">-</span>)</div>
+          <div><strong>Patient:</strong> <span id="modalPatientName">-</span></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="testResultText">Laboratory Finding / Report Result <span class="required">*</span></label>
+          <textarea id="testResultText" class="form-control" rows="3" placeholder="Enter quantitative values, interpretation, or observations (e.g. Hb: 13.5 g/dL, WBC: 7,200 /uL, Platelets: Normal)" required></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeResultModal()">Cancel</button>
+        <button type="button" id="saveResultBtn" class="btn btn-primary" onclick="submitResult()">
+          Save Lab Findings
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    let myPatients = [];
+    let currentTestToUpdate = null;
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Doctor')) return;
+      renderNavbar('lab-tests');
+      await loadPatients();
+    });
+
+    async function loadPatients() {
+      const select = document.getElementById('testPatient');
+      try {
+        myPatients = await apiFetch('/api/doctor/patients');
+        if (!Array.isArray(myPatients) || myPatients.length === 0) {
+          select.innerHTML = '<option value="">No patients available</option>';
+          return;
+        }
+
+        select.innerHTML = '<option value="">-- Choose Patient --</option>' +
+          myPatients.map(p =>
+            `<option value="${p.PatientID}">${escapeHtml(p.Name)} (ID: #${p.PatientID})</option>`
+          ).join('');
+      } catch (err) {
+        select.innerHTML = '<option value="">Failed to load patients</option>';
+      }
+    }
+
+    async function onPatientSelected() {
+      const pid = document.getElementById('testPatient').value;
+      const indicator = document.getElementById('selectedPatientIndicator');
+      const container = document.getElementById('patientTestsContainer');
+
+      if (!pid) {
+        indicator.textContent = 'Select a patient above';
+        container.innerHTML = '<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Please select a patient above to view their diagnostic investigations.</p>';
+        return;
+      }
+
+      const patientObj = myPatients.find(p => String(p.PatientID) === String(pid));
+      indicator.textContent = patientObj ? `Viewing: ${patientObj.Name}` : '';
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading investigations...</p>';
+
+      try {
+        const hist = await apiFetch(`/api/doctor/patients/${pid}/history`);
+        const tests = hist.lab_tests || [];
+
+        const columns = [
+          { label: 'Test ID', render: (_, r) => `<strong>#${r.TestID}</strong>` },
+          { label: 'Investigation Name', render: (_, r) => `<strong>🔬 ${escapeHtml(r.TestName)}</strong>` },
+          { label: 'Order Date', render: (_, r) => formatDate(r.TestDate) },
+          {
+            label: 'Reported Findings',
+            render: (_, r) => r.Result
+              ? `<div style="background:#f1f5f9; padding:0.3rem 0.5rem; border-radius:var(--radius-sm); font-size:0.85rem;">${escapeHtml(r.Result)}</div>`
+              : '<span style="color:var(--text-muted); font-style:italic;">Awaiting analysis</span>'
+          },
+          {
+            label: 'Action',
+            render: (_, r) => `
+              <button type="button" class="btn btn-outline btn-sm" onclick="openResultModal(${r.TestID}, '${escapeHtml(r.TestName)}', '${escapeHtml(patientObj ? patientObj.Name : '')}', '${escapeHtml(r.Result || '')}')">
+                ${r.Result ? 'Edit Finding' : '+ Enter Result'}
+              </button>
+            `
+          }
+        ];
+
+        container.innerHTML = renderTable(columns, tests, { emptyText: 'No lab tests on record for this patient.' });
+      } catch (err) {
+        container.innerHTML = `<p style="color: var(--error); padding: 2rem; text-align: center;">Error loading tests: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    async function handleOrderTest(e) {
+      e.preventDefault();
+      clearMessage('alertBox');
+
+      const pid = document.getElementById('testPatient').value;
+      const testName = document.getElementById('testName').value.trim();
+      const orderBtn = document.getElementById('orderBtn');
+
+      if (!pid || !testName) {
+        showMessage('alertBox', 'warning', 'Please pick a patient and provide the test name.');
+        return;
+      }
+
+      orderBtn.disabled = true;
+      orderBtn.textContent = 'Ordering Test...';
+
+      try {
+        const res = await apiFetch('/api/doctor/lab-tests', {
+          method: 'POST',
+          body: {
+            PatientID: parseInt(pid, 10),
+            TestName: testName
+          }
+        });
+
+        showMessage('alertBox', 'success', `Lab investigation "${testName}" ordered successfully! (ID: #${res.TestID})`);
+        document.getElementById('testName').value = '';
+        await onPatientSelected();
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || 'Failed to order lab test.');
+      } finally {
+        orderBtn.disabled = false;
+        orderBtn.textContent = 'Order Investigation';
+      }
+    }
+
+    function openResultModal(tid, tName, pName, currentResult) {
+      currentTestToUpdate = tid;
+      clearMessage('modalAlertBox');
+
+      document.getElementById('modalTestId').textContent = tid;
+      document.getElementById('modalTestName').textContent = tName;
+      document.getElementById('modalPatientName').textContent = pName;
+      document.getElementById('testResultText').value = currentResult || '';
+
+      document.getElementById('resultModal').classList.add('show');
+    }
+
+    function closeResultModal() {
+      currentTestToUpdate = null;
+      document.getElementById('resultModal').classList.remove('show');
+    }
+
+    async function submitResult() {
+      if (!currentTestToUpdate) return;
+      clearMessage('modalAlertBox');
+
+      const resultText = document.getElementById('testResultText').value.trim();
+      if (!resultText) {
+        showMessage('modalAlertBox', 'error', 'Please enter a result or finding.');
+        return;
+      }
+
+      const saveBtn = document.getElementById('saveResultBtn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      try {
+        const res = await apiFetch(`/api/doctor/lab-tests/${currentTestToUpdate}`, {
+          method: 'PUT',
+          body: { Result: resultText }
+        });
+
+        closeResultModal();
+        showMessage('alertBox', 'success', res.message || 'Lab finding successfully recorded.');
+        await onPatientSelected();
+      } catch (err) {
+        showMessage('modalAlertBox', 'error', err.message || 'Failed to save result.');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Lab Findings';
+      }
+    }
+  </script>
+</body>
+</html>

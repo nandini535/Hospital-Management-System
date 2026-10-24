@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Accounts Management - Admin Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">User Account Directory</h1>
+        <p class="page-subtitle">Manage login access permissions and enable or disable system users</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="loadUsers()">🔄 Refresh</button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">All System Accounts</h2>
+        <div style="max-width: 280px; width: 100%;">
+          <input type="text" id="userSearch" class="form-control" placeholder="Search by username or role..." oninput="filterUsers()">
+        </div>
+      </div>
+      <div class="card-body" id="usersContainer" style="padding: 0;">
+        <p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading user accounts...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    let allUsers = [];
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Admin')) return;
+      renderNavbar('users');
+      await loadUsers();
+    });
+
+    async function loadUsers() {
+      clearMessage('alertBox');
+      const container = document.getElementById('usersContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading accounts...</p>';
+
+      try {
+        allUsers = await apiFetch('/api/admin/users');
+        filterUsers();
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Unable to fetch user list: ' + err.message);
+        container.innerHTML = '<p style="color: var(--error); padding: 2rem; text-align: center;">Error loading users.</p>';
+      }
+    }
+
+    function filterUsers() {
+      const q = document.getElementById('userSearch').value.toLowerCase().trim();
+      const filtered = allUsers.filter(u =>
+        (u.Username && u.Username.toLowerCase().includes(q)) ||
+        (u.Role && u.Role.toLowerCase().includes(q)) ||
+        (u.Status && u.Status.toLowerCase().includes(q))
+      );
+      renderUsersTable(filtered);
+    }
+
+    function renderUsersTable(list) {
+      const container = document.getElementById('usersContainer');
+      const currentAdmin = getUser();
+
+      const columns = [
+        { label: 'User ID', render: (_, r) => `<strong>#${r.UserID}</strong>` },
+        {
+          label: 'Username',
+          render: (_, r) => `
+            <code>${escapeHtml(r.Username)}</code>
+            ${currentAdmin.username === r.Username ? '<span style="font-size:0.7rem; color:var(--primary); font-weight:600; margin-left:0.4rem;">(You)</span>' : ''}
+          `
+        },
+        { label: 'Role', render: (_, r) => `<span class="badge badge-role">${escapeHtml(r.Role)}</span>` },
+        { label: 'Linked Profile', render: (_, r) => r.DoctorID ? `Doctor #${r.DoctorID}` : (r.PatientID ? `Patient #${r.PatientID}` : 'Staff') },
+        { label: 'Account Status', render: (_, r) => statusBadge(r.Status) },
+        {
+          label: 'Access Control',
+          render: (_, r) => {
+            if (currentAdmin.username === r.Username) {
+              return '<span style="color:var(--text-muted); font-size:0.75rem;">Current Account</span>';
+            }
+            if (r.Status === 'Pending') {
+              return '<a href="approvals.html" class="btn btn-outline btn-sm">Review Approval</a>';
+            }
+            if (r.Status === 'Active') {
+              return `
+                <button type="button" class="btn btn-danger btn-sm" onclick="toggleUser(${r.UserID}, 'disable')">
+                  Disable Access
+                </button>
+              `;
+            }
+            if (r.Status === 'Disabled') {
+              return `
+                <button type="button" class="btn btn-success btn-sm" onclick="toggleUser(${r.UserID}, 'enable')">
+                  Enable Access
+                </button>
+              `;
+            }
+            return '-';
+          }
+        }
+      ];
+
+      container.innerHTML = renderTable(columns, list, { emptyText: 'No matching user accounts found.' });
+    }
+
+    async function toggleUser(uid, action) {
+      const verb = action === 'disable' ? 'disable' : 'enable';
+      if (!confirm(`Are you sure you want to ${verb} login access for User #${uid}?`)) {
+        return;
+      }
+
+      clearMessage('alertBox');
+      try {
+        const res = await apiFetch(`/api/admin/users/${uid}/${action}`, {
+          method: 'POST'
+        });
+
+        showMessage('alertBox', 'success', res.message || `Account has been ${action}d.`);
+        await loadUsers();
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || `Failed to ${verb} user.`);
+      }
+    }
+  </script>
+</body>
+</html>

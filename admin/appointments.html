@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Appointments & Walk-in Booking - Admin Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Hospital Master Appointments</h1>
+        <p class="page-subtitle">Schedule walk-in consultations, review daily calendars, and bill completed visits</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="loadAppointments()">🔄 Refresh</button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Walk-in Booking Accordion / Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">+ Walk-in Patient Appointment Booking</h2>
+      </div>
+      <div class="card-body">
+        <form id="walkInForm" onsubmit="handleWalkInBooking(event)">
+          <div class="form-row">
+            <div class="form-group" style="flex: 2; min-width: 250px;">
+              <label class="form-label" for="bookPatient">Patient <span class="required">*</span></label>
+              <select id="bookPatient" class="form-control" required>
+                <option value="">Loading patients...</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex: 2; min-width: 250px;">
+              <label class="form-label" for="bookDoctor">Doctor <span class="required">*</span></label>
+              <select id="bookDoctor" class="form-control" onchange="onDoctorOrDateChange()" required>
+                <option value="">Loading doctors...</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex: 1; min-width: 170px;">
+              <label class="form-label" for="bookDate">Date <span class="required">*</span></label>
+              <input type="date" id="bookDate" class="form-control" onchange="onDoctorOrDateChange()" required>
+            </div>
+          </div>
+
+          <!-- Dynamic Slots Grid -->
+          <div style="margin-top: 0.75rem;">
+            <label class="form-label">Available Slots <span class="required">*</span></label>
+            <div id="slotsMessage" style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+              Select a doctor and date to check slot availability.
+            </div>
+            <div id="slotsContainer" class="slots-container"></div>
+          </div>
+
+          <div class="form-group" style="margin-top: 1rem;">
+            <label class="form-label" for="bookReason">Reason / Symptoms (Optional)</label>
+            <input type="text" id="bookReason" class="form-control" placeholder="e.g. Walk-in acute headache consultation">
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
+            <button type="submit" id="submitBookBtn" class="btn btn-primary" disabled>
+              Book Walk-in Appointment
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Master Appointments Filter & Table Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Scheduled Consultations Directory</h2>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <label for="filterDate" style="font-size: 0.85rem; margin: 0; white-space: nowrap;">Filter Date:</label>
+          <input type="date" id="filterDate" class="form-control" style="width: 170px;" onchange="loadAppointments()">
+          <button type="button" class="btn btn-outline btn-sm" onclick="clearDateFilter()">All Dates</button>
+        </div>
+      </div>
+      <div class="card-body" id="appointmentsTableContainer" style="padding: 0;">
+        <p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading appointments...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generate Bill Modal -->
+  <div class="modal-backdrop" id="billModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Generate Consultation Bill</h3>
+        <button type="button" class="modal-close" onclick="closeBillModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="billModalAlert"></div>
+        <div style="background: #f8fafc; padding: 0.85rem; border-radius: var(--radius-sm); margin-bottom: 1rem; border: 1px solid var(--border-color); font-size: 0.85rem;">
+          <div><strong>Appointment:</strong> <span id="billApptId">-</span></div>
+          <div><strong>Patient:</strong> <span id="billPatientName">-</span></div>
+          <div><strong>Doctor:</strong> <span id="billDoctorName">-</span></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="billPayMode">Billing Payment Mode</label>
+          <select id="billPayMode" class="form-control">
+            <option value="Cash" selected>Cash</option>
+            <option value="Card">Card</option>
+            <option value="UPI">UPI</option>
+            <option value="Insurance">Insurance</option>
+          </select>
+          <div class="form-help">Bill status will be set to Pending and can be settled anytime in the Billing module.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeBillModal()">Cancel</button>
+        <button type="button" id="confirmGenerateBillBtn" class="btn btn-primary" onclick="submitGenerateBill()">
+          Generate Invoice
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    let selectedTime = null;
+    let currentBillingAppt = null;
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Admin')) return;
+      renderNavbar('appointments');
+
+      const todayStr = new Date().toISOString().split('T')[0];
+      document.getElementById('bookDate').min = todayStr;
+      document.getElementById('bookDate').value = todayStr;
+
+      await Promise.all([loadPatients(), loadDoctors()]);
+      await loadAppointments();
+
+      // Check URL for preselected patient
+      const urlParams = new URLSearchParams(window.location.search);
+      const prePid = urlParams.get('patientId');
+      if (prePid) {
+        document.getElementById('bookPatient').value = prePid;
+      }
+    });
+
+    async function loadPatients() {
+      const select = document.getElementById('bookPatient');
+      try {
+        const patients = await apiFetch('/api/patients');
+        select.innerHTML = '<option value="">-- Choose Patient --</option>' +
+          patients.map(p => `<option value="${p.PatientID}">${escapeHtml(p.Name)} (ID: #${p.PatientID})</option>`).join('');
+      } catch (e) {
+        select.innerHTML = '<option value="">Failed to load patients</option>';
+      }
+    }
+
+    async function loadDoctors() {
+      const select = document.getElementById('bookDoctor');
+      try {
+        const doctors = await apiFetch('/api/doctors');
+        select.innerHTML = '<option value="">-- Choose Doctor --</option>' +
+          doctors.map(d => `<option value="${d.DoctorID}">Dr. ${escapeHtml(d.Name)} (${escapeHtml(d.Specialization)} - Fee: ₹${d.ConsultationFee})</option>`).join('');
+      } catch (e) {
+        select.innerHTML = '<option value="">Failed to load doctors</option>';
+      }
+    }
+
+    async function onDoctorOrDateChange() {
+      const did = document.getElementById('bookDoctor').value;
+      const dateVal = document.getElementById('bookDate').value;
+      const container = document.getElementById('slotsContainer');
+      const msg = document.getElementById('slotsMessage');
+      const bookBtn = document.getElementById('submitBookBtn');
+
+      selectedTime = null;
+      bookBtn.disabled = true;
+
+      if (!did || !dateVal) {
+        msg.textContent = 'Select both a doctor and date to view time slots.';
+        container.innerHTML = '';
+        return;
+      }
+
+      msg.textContent = 'Loading timetable availability...';
+      container.innerHTML = '';
+
+      try {
+        const slots = await apiFetch(`/api/doctors/${did}/slots?date=${dateVal}`);
+        if (!Array.isArray(slots) || slots.length === 0) {
+          msg.textContent = 'No available slots scheduled for this doctor on the selected date.';
+          return;
+        }
+
+        const availCount = slots.filter(s => s.available).length;
+        msg.textContent = `Found ${slots.length} total slots (${availCount} available). Choose time:`;
+
+        container.innerHTML = slots.map(s => `
+          <button type="button"
+                  class="slot-btn"
+                  ${!s.available ? 'disabled' : ''}
+                  onclick="selectSlot('${escapeHtml(s.time)}', this)">
+            ${formatTime(s.time)}
+            <div style="font-size:0.675rem; color:${s.available ? 'var(--success)' : 'var(--text-muted)'};">
+              ${s.available ? 'Available' : 'Booked'}
+            </div>
+          </button>
+        `).join('');
+      } catch (err) {
+        msg.textContent = 'Failed to load slots: ' + err.message;
+      }
+    }
+
+    function selectSlot(timeStr, btn) {
+      selectedTime = timeStr;
+      document.querySelectorAll('#slotsContainer .slot-btn').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      document.getElementById('submitBookBtn').disabled = false;
+    }
+
+    async function handleWalkInBooking(e) {
+      e.preventDefault();
+      clearMessage('alertBox');
+
+      const pid = document.getElementById('bookPatient').value;
+      const did = document.getElementById('bookDoctor').value;
+      const dateVal = document.getElementById('bookDate').value;
+      const reason = document.getElementById('bookReason').value.trim() || null;
+      const bookBtn = document.getElementById('submitBookBtn');
+
+      if (!pid || !did || !dateVal || !selectedTime) {
+        showMessage('alertBox', 'warning', 'Please select patient, doctor, date and an available slot.');
+        return;
+      }
+
+      bookBtn.disabled = true;
+      bookBtn.textContent = 'Booking...';
+
+      try {
+        const res = await apiFetch('/api/admin/appointments', {
+          method: 'POST',
+          body: {
+            PatientID: parseInt(pid, 10),
+            DoctorID: parseInt(did, 10),
+            Date: dateVal,
+            Time: selectedTime,
+            Reason: reason
+          }
+        });
+
+        showMessage('alertBox', 'success', `Walk-in appointment #${res.AppointmentID} successfully scheduled!`);
+        selectedTime = null;
+        document.getElementById('bookReason').value = '';
+        await onDoctorOrDateChange();
+        await loadAppointments();
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || 'Failed to book appointment.');
+      } finally {
+        bookBtn.disabled = false;
+        bookBtn.textContent = 'Book Walk-in Appointment';
+      }
+    }
+
+    async function loadAppointments() {
+      clearMessage('alertBox');
+      const container = document.getElementById('appointmentsTableContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading appointments...</p>';
+
+      const filterDate = document.getElementById('filterDate').value;
+      const endpoint = filterDate ? `/api/appointments-detail?date=${filterDate}` : '/api/appointments-detail';
+
+      try {
+        const appts = await apiFetch(endpoint);
+
+        const columns = [
+          { label: 'ID', render: (_, r) => `<strong>#${r.AppointmentID}</strong>` },
+          { label: 'Patient Name', render: (_, r) => `<strong>👤 ${escapeHtml(r.PatientName)}</strong> (ID: #${r.PatientID})` },
+          { label: 'Doctor', render: (_, r) => `Dr. ${escapeHtml(r.DoctorName)} <span style="font-size:0.75rem; color:var(--text-muted);">(${escapeHtml(r.Specialization)})</span>` },
+          { label: 'Department', render: (_, r) => escapeHtml(r.DeptName || '-') },
+          { label: 'Date', render: (_, r) => formatDate(r.Date) },
+          { label: 'Time', render: (_, r) => formatTime(r.Time) },
+          { label: 'Reason', render: (_, r) => escapeHtml(r.Reason || '-') },
+          { label: 'Status', render: (_, r) => statusBadge(r.Status) },
+          {
+            label: 'Action',
+            render: (_, r) => {
+              if (r.Status === 'Completed') {
+                return `
+                  <button type="button" class="btn btn-outline btn-sm" onclick="openBillModal(${JSON.stringify(r).replace(/"/g, '&quot;')})">
+                    🧾 Generate Bill
+                  </button>
+                `;
+              }
+              return '<span style="color:var(--text-muted); font-size:0.8rem;">-</span>';
+            }
+          }
+        ];
+
+        container.innerHTML = renderTable(columns, appts, { emptyText: 'No appointments found.' });
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Unable to fetch appointments: ' + err.message);
+        container.innerHTML = '<p style="color: var(--error); padding: 2rem; text-align: center;">Error loading records.</p>';
+      }
+    }
+
+    function clearDateFilter() {
+      document.getElementById('filterDate').value = '';
+      loadAppointments();
+    }
+
+    function openBillModal(appt) {
+      currentBillingAppt = appt;
+      clearMessage('billModalAlert');
+
+      document.getElementById('billApptId').textContent = '#' + appt.AppointmentID;
+      document.getElementById('billPatientName').textContent = appt.PatientName;
+      document.getElementById('billDoctorName').textContent = appt.DoctorName;
+
+      document.getElementById('billModal').classList.add('show');
+    }
+
+    function closeBillModal() {
+      currentBillingAppt = null;
+      document.getElementById('billModal').classList.remove('show');
+    }
+
+    async function submitGenerateBill() {
+      if (!currentBillingAppt) return;
+      clearMessage('billModalAlert');
+
+      const mode = document.getElementById('billPayMode').value;
+      const btn = document.getElementById('confirmGenerateBillBtn');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+
+      try {
+        const res = await apiFetch(`/api/appointments/${currentBillingAppt.AppointmentID}/generate-bill`, {
+          method: 'POST',
+          body: { PaymentMode: mode }
+        });
+
+        closeBillModal();
+        showMessage('alertBox', 'success', `Consultation bill #${res.BillID} generated successfully for ${formatCurrency(res.total)}.`);
+        await loadAppointments();
+      } catch (err) {
+        showMessage('billModalAlert', 'error', err.message || 'Failed to generate bill.');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Generate Invoice';
+      }
+    }
+  </script>
+</body>
+</html>
