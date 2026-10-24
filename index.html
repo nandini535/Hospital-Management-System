@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Hospital Management System</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="auth-wrapper">
+    <div class="auth-card">
+      <div class="auth-header">
+        <div class="auth-logo">🏥</div>
+        <h1 class="auth-title">Hospital Management System</h1>
+        <p class="auth-subtitle">Sign in to access your portal</p>
+      </div>
+
+      <!-- Quick Demo Credentials Box -->
+      <div class="demo-credentials">
+        <div><strong>Demo Accounts:</strong> Click to fill credentials</div>
+        <div class="demo-btn-group">
+          <button type="button" class="demo-btn" onclick="fillDemo('admin', 'Admin@123')">Admin</button>
+          <button type="button" class="demo-btn" onclick="fillDemo('doctor1', 'Doctor@123')">Doctor</button>
+          <button type="button" class="demo-btn" onclick="fillDemo('patient1', 'Patient@123')">Patient</button>
+        </div>
+      </div>
+
+      <!-- Alert message container -->
+      <div id="alertBox"></div>
+
+      <!-- Login Form -->
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label class="form-label" for="username">Username <span class="required">*</span></label>
+          <input
+            type="text"
+            id="username"
+            name="username"
+            class="form-control"
+            placeholder="Enter username"
+            required
+            autocomplete="username"
+          >
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="password">Password <span class="required">*</span></label>
+          <input
+            type="password"
+            id="password"
+            name="password"
+            class="form-control"
+            placeholder="Enter password"
+            required
+            autocomplete="current-password"
+          >
+        </div>
+
+        <div class="form-group" style="margin-top: 1.25rem;">
+          <button type="submit" id="submitBtn" class="btn btn-primary btn-block">
+            Sign In
+          </button>
+        </div>
+      </form>
+
+      <div style="text-align: center; margin-top: 1.25rem; font-size: 0.85rem; color: var(--secondary);">
+        Don't have an account? <a href="register.html">Register here</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    // Auto-redirect if already logged in
+    window.addEventListener('DOMContentLoaded', () => {
+      const token = getToken();
+      const role = getRole();
+      if (token && role) {
+        redirectByRole(role);
+      }
+    });
+
+    function fillDemo(user, pass) {
+      document.getElementById('username').value = user;
+      document.getElementById('password').value = pass;
+      clearMessage('alertBox');
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      clearMessage('alertBox');
+
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const submitBtn = document.getElementById('submitBtn');
+
+      if (!username || !password) {
+        showMessage('alertBox', 'error', 'Please enter both username and password.');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Signing in...';
+
+      try {
+        const data = await apiFetch('/api/auth/login', {
+          method: 'POST',
+          body: { Username: username, Password: password }
+        });
+
+        // Store session data: token, role, name, DoctorID, PatientID
+        saveSession(data);
+
+        showMessage('alertBox', 'success', 'Login successful! Redirecting...');
+        setTimeout(() => {
+          redirectByRole(data.role);
+        }, 500);
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || 'Login failed. Please check credentials.');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Sign In';
+      }
+    }
+  </script>
+</body>
+</html>
