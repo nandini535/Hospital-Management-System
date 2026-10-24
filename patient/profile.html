@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Profile & Security - Patient Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Profile & Account Settings</h1>
+        <p class="page-subtitle">Update your personal contact information or change your account password</p>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <div class="form-row">
+      <!-- Card 1: Personal Profile Details -->
+      <div class="card" style="flex: 3; min-width: 320px;">
+        <div class="card-header">
+          <h2 class="card-title">Personal Information</h2>
+        </div>
+        <div class="card-body">
+          <form id="profileForm" onsubmit="handleUpdateProfile(event)">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="profId">Patient ID</label>
+                <input type="text" id="profId" class="form-control" disabled readonly>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="profName">Full Name <span class="required">*</span></label>
+                <input type="text" id="profName" class="form-control" required>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="profGender">Gender</label>
+                <input type="text" id="profGender" class="form-control" disabled readonly>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="profDob">Date of Birth</label>
+                <input type="text" id="profDob" class="form-control" disabled readonly>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="profPhone">Contact Phone</label>
+                <input type="tel" id="profPhone" class="form-control" placeholder="Phone number">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="profBloodGroup">Blood Group</label>
+                <select id="profBloodGroup" class="form-control">
+                  <option value="Unknown">Unknown</option>
+                  <option value="A+">A+</option>
+                  <option value="A-">A-</option>
+                  <option value="B+">B+</option>
+                  <option value="B-">B-</option>
+                  <option value="AB+">AB+</option>
+                  <option value="AB-">AB-</option>
+                  <option value="O+">O+</option>
+                  <option value="O-">O-</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="profAddress">Residential Address</label>
+              <textarea id="profAddress" class="form-control" rows="2" placeholder="Full address"></textarea>
+            </div>
+
+            <div style="margin-top: 1.25rem;">
+              <button type="submit" id="saveProfBtn" class="btn btn-primary">
+                Save Profile Changes
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Card 2: Change Password -->
+      <div class="card" style="flex: 2; min-width: 280px;">
+        <div class="card-header">
+          <h2 class="card-title">Security & Password</h2>
+        </div>
+        <div class="card-body">
+          <div id="pwAlertBox"></div>
+
+          <form id="passwordForm" onsubmit="handleChangePassword(event)">
+            <div class="form-group">
+              <label class="form-label" for="oldPassword">Current Password <span class="required">*</span></label>
+              <input type="password" id="oldPassword" class="form-control" required autocomplete="current-password">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="newPassword">New Password <span class="required">* (min 8 chars)</span></label>
+              <input type="password" id="newPassword" class="form-control" minlength="8" required autocomplete="new-password">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="confirmPassword">Confirm New Password <span class="required">*</span></label>
+              <input type="password" id="confirmPassword" class="form-control" minlength="8" required autocomplete="new-password">
+            </div>
+
+            <div style="margin-top: 1.25rem;">
+              <button type="submit" id="savePwBtn" class="btn btn-secondary btn-block">
+                Change Password
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Patient')) return;
+      renderNavbar('profile');
+      await loadProfile();
+    });
+
+    async function loadProfile() {
+      clearMessage('alertBox');
+      try {
+        const data = await apiFetch('/api/patient/profile');
+        if (data) {
+          document.getElementById('profId').value = '#' + (data.PatientID || '');
+          document.getElementById('profName').value = data.Name || '';
+          document.getElementById('profGender').value = data.Gender || '-';
+          document.getElementById('profDob').value = formatDate(data.DOB);
+          document.getElementById('profPhone').value = data.Phone || '';
+          document.getElementById('profAddress').value = data.Address || '';
+          if (data.BloodGroup) {
+            document.getElementById('profBloodGroup').value = data.BloodGroup;
+          }
+        }
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Failed to load profile details: ' + err.message);
+      }
+    }
+
+    async function handleUpdateProfile(e) {
+      e.preventDefault();
+      clearMessage('alertBox');
+
+      const name = document.getElementById('profName').value.trim();
+      const phone = document.getElementById('profPhone').value.trim() || null;
+      const address = document.getElementById('profAddress').value.trim() || null;
+      const bloodGroup = document.getElementById('profBloodGroup').value;
+
+      if (!name) {
+        showMessage('alertBox', 'error', 'Name cannot be empty.');
+        return;
+      }
+
+      const saveBtn = document.getElementById('saveProfBtn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      try {
+        const payload = {
+          Name: name,
+          Phone: phone,
+          Address: address,
+          BloodGroup: bloodGroup !== 'Unknown' ? bloodGroup : null
+        };
+
+        const res = await apiFetch('/api/patient/profile', {
+          method: 'PUT',
+          body: payload
+        });
+
+        // Update local session name if changed
+        localStorage.setItem('name', name);
+        renderNavbar('profile');
+
+        showMessage('alertBox', 'success', res.message || 'Profile updated successfully.');
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || 'Failed to update profile.');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Profile Changes';
+      }
+    }
+
+    async function handleChangePassword(e) {
+      e.preventDefault();
+      clearMessage('pwAlertBox');
+
+      const oldPassword = document.getElementById('oldPassword').value;
+      const newPassword = document.getElementById('newPassword').value;
+      const confirmPassword = document.getElementById('confirmPassword').value;
+      const pwBtn = document.getElementById('savePwBtn');
+
+      if (newPassword.length < 8) {
+        showMessage('pwAlertBox', 'error', 'New password must be at least 8 characters long.');
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        showMessage('pwAlertBox', 'error', 'New password and confirm password do not match.');
+        return;
+      }
+
+      pwBtn.disabled = true;
+      pwBtn.textContent = 'Updating...';
+
+      try {
+        const res = await apiFetch('/api/auth/change-password', {
+          method: 'POST',
+          body: {
+            OldPassword: oldPassword,
+            NewPassword: newPassword
+          }
+        });
+
+        document.getElementById('passwordForm').reset();
+        showMessage('pwAlertBox', 'success', res.message || 'Password changed successfully!');
+      } catch (err) {
+        showMessage('pwAlertBox', 'error', err.message || 'Failed to change password.');
+      } finally {
+        pwBtn.disabled = false;
+        pwBtn.textContent = 'Change Password';
+      }
+    }
+  </script>
+</body>
+</html>
