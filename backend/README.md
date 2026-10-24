@@ -25,22 +25,18 @@ backend/
 ├── seed_users.py       Creates the admin and demo accounts
 └── requirements.txt
 ```
-The database scripts are in `sql/` and the tests in `tests/`, both at the project root.
+The database scripts are in `sql/` (`schema_v2.sql`, `sample_data.sql`) and the tests in `tests/`, both at the project root.
 
 ## Setup
 
 ### 1. Create the database
-Run from the project root. Choose one:
+Run from the project root (MySQL 8.0.16+):
 
 ```bash
-# Fresh install
 mysql -u root -p < sql/schema_v2.sql
 mysql -u root -p < sql/sample_data.sql
-
-# Already have the old (v1) database with data
-mysql -u root -p < sql/migration_v2.sql
 ```
-`schema_v2.sql` creates the database `hospital_db`. `migration_v2.sql` keeps your existing data and adds the new tables and columns. Run it only once.
+`schema_v2.sql` **drops and recreates** the database `hospital_db`, so only run it on a fresh setup. `sample_data.sql` adds demo departments, doctors (with Mon-Fri timetables), patients, rooms and medicines.
 
 ### 2. Install dependencies
 ```bash
@@ -219,8 +215,6 @@ Admins also get create, read, update and delete on every table at `/api/<resourc
 | `Access denied for user` | Check `DB_USER` and `DB_PASSWORD`, and that the variables are set in this terminal. |
 | `Can't connect to MySQL server` | Start MySQL and check `DB_HOST` and `DB_PORT`. |
 | `Unknown database 'hospital_db'` | Run the SQL setup step first. |
-| `Unknown column 'ConsultationFee'` | You loaded the old schema. Run `migration_v2.sql`. |
-| Migration fails on `DROP INDEX DoctorID` | The index has a different name. Run `SHOW INDEX FROM Appointment;`, find the unique key on `DoctorID, Date, Time`, and drop that name. |
 | `401 Login required` | Send the `Authorization: Bearer <token>` header. |
 | `ModuleNotFoundError` | Run `pip install -r requirements.txt` inside `backend/`. |
 | Website can't reach the API | The API must be running on port 5000, and the site should call `http://localhost:5000`. |

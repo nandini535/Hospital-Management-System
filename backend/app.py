@@ -7,6 +7,7 @@ import mysql.connector
 from flask import Flask, g, jsonify, request
 from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
 
 import db
 import routes_auth, routes_doctor, routes_patient
@@ -50,6 +51,17 @@ def integrity_error(e):
 @app.errorhandler(mysql.connector.Error)
 def db_error(e):
     return jsonify(error="Database error", detail=e.msg), 400
+
+
+@app.errorhandler(HTTPException)
+def http_error(e):
+    return jsonify(error=e.description or e.name), e.code
+
+
+@app.errorhandler(Exception)
+def unexpected_error(e):
+    app.logger.exception(e)
+    return jsonify(error="Internal server error"), 500
 
 
 @app.get("/api/health")

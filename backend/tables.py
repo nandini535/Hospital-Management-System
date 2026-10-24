@@ -7,7 +7,7 @@ TABLES = {
     "patients":     {"name": "Patient",      "pk": "PatientID",      "cols": ["Name", "Gender", "DOB", "Phone", "Address", "BloodGroup"]},
     "appointments": {"name": "Appointment",  "pk": "AppointmentID",  "cols": ["Date", "Time", "Status", "Reason", "PatientID", "DoctorID"]},
     "wards":        {"name": "Ward",         "pk": "WardID",         "cols": ["DeptID", "WardName", "Capacity", "Status"]},
-    "rooms":        {"name": "Room",         "pk": "RoomID",         "cols": ["WardID", "Type", "Charge", "Status"]},
+    "rooms":        {"name": "Room",         "pk": "RoomID",         "cols": ["WardID", "RoomNumber", "Type", "Charge", "Status"]},
     "nurses":       {"name": "Nurse",        "pk": "NurseID",        "cols": ["Name", "Phone", "Shift", "DeptID", "WardID"]},
     "admissions":   {"name": "Admission",    "pk": "AdmissionID",    "cols": ["PatientID", "RoomID", "AdmitDate", "DischargeDate"]},
     "prescriptions":{"name": "Prescription", "pk": "PrescriptionID", "cols": ["Date", "Notes", "PatientID", "DoctorID"]},
