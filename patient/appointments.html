@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Appointments - Patient Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">My Appointments</h1>
+        <p class="page-subtitle">View past and scheduled consultations with your doctors</p>
+      </div>
+      <div>
+        <a href="book.html" class="btn btn-primary">+ Book New Appointment</a>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Filter Bar -->
+    <div class="card">
+      <div class="card-body" style="padding: 0.75rem 1rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <label for="statusFilter" class="form-label" style="margin: 0; white-space: nowrap;">Filter Status:</label>
+            <select id="statusFilter" class="form-control" style="width: 160px;" onchange="filterAppointments()">
+              <option value="ALL">All Appointments</option>
+              <option value="Scheduled">Scheduled</option>
+              <option value="Completed">Completed</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="loadAppointments()">
+            🔄 Refresh
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Appointments Table Container -->
+    <div id="appointmentsTableContainer">
+      <p style="color: var(--text-muted); padding: 1.5rem 0; text-align: center;">Loading appointments...</p>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    let allAppointments = [];
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Patient')) return;
+      renderNavbar('appointments');
+      await loadAppointments();
+    });
+
+    async function loadAppointments() {
+      clearMessage('alertBox');
+      const container = document.getElementById('appointmentsTableContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 1.5rem 0; text-align: center;">Loading appointments...</p>';
+
+      try {
+        allAppointments = await apiFetch('/api/patient/appointments');
+        filterAppointments();
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Failed to fetch appointments: ' + err.message);
+        container.innerHTML = '<p style="color: var(--error); text-align: center;">Unable to load records.</p>';
+      }
+    }
+
+    function filterAppointments() {
+      const filter = document.getElementById('statusFilter').value;
+      const filtered = filter === 'ALL'
+        ? allAppointments
+        : allAppointments.filter(a => a.Status === filter);
+
+      renderAppointmentsTable(filtered);
+    }
+
+    function renderAppointmentsTable(list) {
+      const container = document.getElementById('appointmentsTableContainer');
+
+      const columns = [
+        { label: 'ID', render: (_, r) => `<strong>#${r.AppointmentID}</strong>` },
+        { label: 'Doctor', render: (_, r) => `<strong>${escapeHtml(r.Doctor)}</strong>` },
+        { label: 'Department / Spec', render: (_, r) => `${escapeHtml(r.DeptName || '-')} <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(r.Specialization || '')}</div>` },
+        { label: 'Date', render: (_, r) => formatDate(r.Date) },
+        { label: 'Time', render: (_, r) => formatTime(r.Time) },
+        { label: 'Reason', render: (_, r) => escapeHtml(r.Reason || '-') },
+        { label: 'Status', render: (_, r) => statusBadge(r.Status) },
+        {
+          label: 'Action',
+          render: (_, r) => {
+            if (r.Status === 'Scheduled') {
+              return `
+                <button type="button" class="btn btn-danger btn-sm" onclick="cancelAppointment(${r.AppointmentID})">
+                  Cancel
+                </button>
+              `;
+            }
+            return '<span style="color: var(--text-muted); font-size: 0.8rem;">-</span>';
+          }
+        }
+      ];
+
+      container.innerHTML = renderTable(columns, list, { emptyText: 'No appointments found.' });
+    }
+
+    async function cancelAppointment(aid) {
+      if (!confirm(`Are you sure you want to cancel appointment #${aid}?`)) {
+        return;
+      }
+
+      clearMessage('alertBox');
+      try {
+        const res = await apiFetch(`/api/patient/appointments/${aid}/cancel`, {
+          method: 'POST'
+        });
+        showMessage('alertBox', 'success', res.message || `Appointment #${aid} has been cancelled.`);
+        await loadAppointments();
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || 'Failed to cancel appointment.');
+      }
+    }
+  </script>
+</body>
+</html>

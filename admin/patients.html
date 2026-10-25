@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Patient Directory & Search - Admin Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Patient Records & Fast Search</h1>
+        <p class="page-subtitle">Search registered patients across hospital records and view full clinical history</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="loadAllPatients()">🔄 View Full List</button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Live Search Card (Key DBMS Demo Feature) -->
+    <div class="card" style="border-left: 4px solid var(--primary);">
+      <div class="card-body">
+        <label class="form-label" for="searchInput" style="font-size: 0.95rem; font-weight: 600;">
+          🔎 Fast Search (Name or Phone Number)
+        </label>
+        <div style="display: flex; gap: 0.75rem;">
+          <input
+            type="text"
+            id="searchInput"
+            class="form-control"
+            placeholder="Type patient name or phone number (e.g. Ramesh or 9000000001)..."
+            style="font-size: 1rem; padding: 0.6rem 0.85rem;"
+            oninput="handleSearchDebounced()"
+            autocomplete="off"
+          >
+          <button type="button" class="btn btn-primary" onclick="executeSearch()">Search</button>
+          <button type="button" class="btn btn-outline" onclick="clearSearch()">Clear</button>
+        </div>
+        <div id="searchMeta" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.4rem;">
+          Showing all registered patients.
+        </div>
+      </div>
+    </div>
+
+    <!-- Patients Results Table -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Patient Directory Results</h2>
+      </div>
+      <div class="card-body" id="patientsContainer" style="padding: 0;">
+        <p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading patients...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full History Modal -->
+  <div class="modal-backdrop" id="historyModal">
+    <div class="modal-dialog modal-dialog-lg">
+      <div class="modal-header">
+        <h3 class="modal-title" id="historyModalTitle">Comprehensive Patient History</h3>
+        <button type="button" class="modal-close" onclick="closeHistoryModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="historyModalBody">
+        <p style="color: var(--text-muted); text-align: center; padding: 2rem;">Loading medical history...</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeHistoryModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    let searchDebounceTimer = null;
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Admin')) return;
+      renderNavbar('patients');
+      await loadAllPatients();
+    });
+
+    async function loadAllPatients() {
+      clearMessage('alertBox');
+      document.getElementById('searchInput').value = '';
+      document.getElementById('searchMeta').textContent = 'Loading full patient directory...';
+      const container = document.getElementById('patientsContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading patients...</p>';
+
+      try {
+        const patients = await apiFetch('/api/patients');
+        document.getElementById('searchMeta').textContent = `Showing all ${patients.length} registered patients.`;
+        renderTableData(patients);
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Failed to load patients: ' + err.message);
+        container.innerHTML = '<p style="color: var(--error); padding: 2rem; text-align: center;">Error loading records.</p>';
+      }
+    }
+
+    function handleSearchDebounced() {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        executeSearch();
+      }, 300);
+    }
+
+    async function executeSearch() {
+      const q = document.getElementById('searchInput').value.trim();
+      const meta = document.getElementById('searchMeta');
+      const container = document.getElementById('patientsContainer');
+
+      if (!q) {
+        await loadAllPatients();
+        return;
+      }
+
+      meta.textContent = `Searching database for "${q}"...`;
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Searching...</p>';
+
+      try {
+        const results = await apiFetch(`/api/patients/search?q=${encodeURIComponent(q)}`);
+        meta.textContent = `Found ${results.length} patient record(s) matching "${q}".`;
+        renderTableData(results);
+      } catch (err) {
+        meta.textContent = 'Search failed.';
+        container.innerHTML = `<p style="color: var(--error); padding: 2rem; text-align: center;">Search error: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    function clearSearch() {
+      document.getElementById('searchInput').value = '';
+      loadAllPatients();
+    }
+
+    function renderTableData(list) {
+      const container = document.getElementById('patientsContainer');
+
+      const columns = [
+        { label: 'Patient ID', render: (_, r) => `<strong>#${r.PatientID}</strong>` },
+        { label: 'Name', render: (_, r) => `<strong>👤 ${escapeHtml(r.Name)}</strong>` },
+        { label: 'Gender', render: (_, r) => escapeHtml(r.Gender || '-') },
+        { label: 'Date of Birth', render: (_, r) => formatDate(r.DOB) },
+        { label: 'Blood Group', render: (_, r) => `<span class="badge badge-role">${escapeHtml(r.BloodGroup || 'Unknown')}</span>` },
+        { label: 'Phone', render: (_, r) => escapeHtml(r.Phone || '-') },
+        { label: 'Address', render: (_, r) => escapeHtml(r.Address || '-') },
+        {
+          label: 'Actions',
+          render: (_, r) => `
+            <div class="btn-group">
+              <button type="button" class="btn btn-outline btn-sm" onclick="viewHistory(${r.PatientID}, '${escapeHtml(r.Name)}')">
+                View History
+              </button>
+              <a href="appointments.html?patientId=${r.PatientID}&name=${encodeURIComponent(r.Name)}" class="btn btn-secondary btn-sm" title="Walk-in booking">
+                + Book
+              </a>
+            </div>
+          `
+        }
+      ];
+
+      container.innerHTML = renderTable(columns, list, { emptyText: 'No matching patient records found in database.' });
+    }
+
+    async function viewHistory(pid, name) {
+      document.getElementById('historyModalTitle').textContent = `Full Record: ${name} (Patient #${pid})`;
+      const body = document.getElementById('historyModalBody');
+      body.innerHTML = '<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading clinical history...</p>';
+      document.getElementById('historyModal').classList.add('show');
+
+      try {
+        const hist = await apiFetch(`/api/patients/${pid}/history`);
+        const p = hist.patient || {};
+        const appts = hist.appointments || [];
+        const rxs = hist.prescriptions || [];
+        const labs = hist.lab_tests || [];
+        const admits = hist.admissions || [];
+        const bills = hist.bills || [];
+
+        body.innerHTML = `
+          <!-- Demographics Card -->
+          <div style="background: #f8fafc; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.85rem; margin-bottom: 1rem;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.5rem; font-size: 0.85rem;">
+              <div><strong>Name:</strong> ${escapeHtml(p.Name)}</div>
+              <div><strong>Gender:</strong> ${escapeHtml(p.Gender || '-')}</div>
+              <div><strong>DOB:</strong> ${formatDate(p.DOB)}</div>
+              <div><strong>Blood Group:</strong> ${escapeHtml(p.BloodGroup || 'Unknown')}</div>
+              <div><strong>Phone:</strong> ${escapeHtml(p.Phone || '-')}</div>
+              <div><strong>Address:</strong> ${escapeHtml(p.Address || '-')}</div>
+            </div>
+          </div>
+
+          <!-- Section: Appointments -->
+          <div class="history-section">
+            <h4 class="history-section-title">📅 Consultations (${appts.length})</h4>
+            ${appts.length > 0 ? `
+              <div class="table-responsive">
+                <table class="table">
+                  <thead><tr><th>Date</th><th>Time</th><th>Doctor</th><th>Reason</th><th>Status</th></tr></thead>
+                  <tbody>
+                    ${appts.map(a => `
+                      <tr>
+                        <td>${formatDate(a.Date)}</td>
+                        <td>${formatTime(a.Time)}</td>
+                        <td>${escapeHtml(a.Doctor || '-')} (${escapeHtml(a.Specialization || '')})</td>
+                        <td>${escapeHtml(a.Reason || '-')}</td>
+                        <td>${statusBadge(a.Status)}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            ` : '<p style="color:var(--text-muted); font-size:0.85rem;">No consultation records.</p>'}
+          </div>
+
+          <!-- Section: Prescriptions -->
+          <div class="history-section" style="margin-top: 1rem;">
+            <h4 class="history-section-title">💊 Medication Prescriptions (${rxs.length})</h4>
+            ${rxs.length > 0 ? rxs.map(rx => `
+              <div style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.65rem; margin-bottom: 0.5rem; background: #fff;">
+                <div style="display:flex; justify-content:space-between; font-size:0.85rem; font-weight:600;">
+                  <span>Rx #${rx.PrescriptionID} by ${escapeHtml(rx.Doctor)}</span>
+                  <span style="color:var(--text-muted);">${formatDate(rx.Date)}</span>
+                </div>
+                ${rx.Notes ? `<div style="font-size:0.8rem; color:var(--secondary); margin-top:0.25rem;"><em>Note:</em> ${escapeHtml(rx.Notes)}</div>` : ''}
+                <div style="font-size:0.8rem; margin-top:0.4rem;">
+                  ${(rx.items || []).map(it => `• <strong>${escapeHtml(it.Medicine)}</strong> - ${escapeHtml(it.Dosage || 'As advised')} (${it.Quantity} units)`).join('<br>')}
+                </div>
+              </div>
+            `).join('') : '<p style="color:var(--text-muted); font-size:0.85rem;">No prescriptions issued.</p>'}
+          </div>
+
+          <!-- Section: Lab Tests -->
+          <div class="history-section" style="margin-top: 1rem;">
+            <h4 class="history-section-title">🔬 Diagnostic Lab Tests (${labs.length})</h4>
+            ${labs.length > 0 ? `
+              <div class="table-responsive">
+                <table class="table">
+                  <thead><tr><th>Investigation</th><th>Date</th><th>Finding</th></tr></thead>
+                  <tbody>
+                    ${labs.map(l => `
+                      <tr>
+                        <td><strong>${escapeHtml(l.TestName)}</strong></td>
+                        <td>${formatDate(l.TestDate)}</td>
+                        <td>${l.Result ? escapeHtml(l.Result) : '<span style="color:var(--text-muted); font-style:italic;">Pending</span>'}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            ` : '<p style="color:var(--text-muted); font-size:0.85rem;">No lab investigations on record.</p>'}
+          </div>
+
+          <!-- Section: Admissions -->
+          <div class="history-section" style="margin-top: 1rem;">
+            <h4 class="history-section-title">🏥 Inpatient Admissions (${admits.length})</h4>
+            ${admits.length > 0 ? `
+              <div class="table-responsive">
+                <table class="table">
+                  <thead><tr><th>Admission ID</th><th>Ward</th><th>Room Type</th><th>Admit Date</th><th>Discharge Date</th></tr></thead>
+                  <tbody>
+                    ${admits.map(ad => `
+                      <tr>
+                        <td>#${ad.AdmissionID}</td>
+                        <td>${escapeHtml(ad.WardName || '-')}</td>
+                        <td>${escapeHtml(ad.RoomType || '-')}</td>
+                        <td>${formatDate(ad.AdmitDate)}</td>
+                        <td>${ad.DischargeDate ? formatDate(ad.DischargeDate) : '<span class="badge badge-active">Admitted</span>'}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            ` : '<p style="color:var(--text-muted); font-size:0.85rem;">No hospital stays.</p>'}
+          </div>
+
+          <!-- Section: Bills -->
+          <div class="history-section" style="margin-top: 1rem;">
+            <h4 class="history-section-title">💳 Invoices & Billing (${bills.length})</h4>
+            ${bills.length > 0 ? `
+              <div class="table-responsive">
+                <table class="table">
+                  <thead><tr><th>Bill ID</th><th>Date</th><th>Amount</th><th>Mode</th><th>Status</th></tr></thead>
+                  <tbody>
+                    ${bills.map(b => `
+                      <tr>
+                        <td>#${b.BillID}</td>
+                        <td>${formatDate(b.Date)}</td>
+                        <td><strong>${formatCurrency(b.Amount)}</strong></td>
+                        <td>${escapeHtml(b.PaymentMode || '-')}</td>
+                        <td>${statusBadge(b.Status)}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            ` : '<p style="color:var(--text-muted); font-size:0.85rem;">No billing records.</p>'}
+          </div>
+        `;
+      } catch (err) {
+        body.innerHTML = `<p style="color:var(--error); padding:2rem; text-align:center;">Failed to load history: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    function closeHistoryModal() {
+      document.getElementById('historyModal').classList.remove('show');
+    }
+  </script>
+</body>
+</html>

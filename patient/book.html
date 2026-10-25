@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Book Appointment - Patient Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Book an Appointment</h1>
+        <p class="page-subtitle">Find a specialist doctor and reserve your consultation slot</p>
+      </div>
+      <div>
+        <a href="appointments.html" class="btn btn-outline btn-sm">View My Appointments</a>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Step 1: Filter Doctors -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">1. Find a Doctor</h2>
+      </div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group" style="flex: 1; min-width: 220px;">
+            <label class="form-label" for="deptFilter">Filter by Department</label>
+            <select id="deptFilter" class="form-control" onchange="searchDoctors()">
+              <option value="">All Departments</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex: 2; min-width: 250px;">
+            <label class="form-label" for="searchQuery">Search by Name or Specialization</label>
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="text" id="searchQuery" class="form-control" placeholder="e.g. Cardiologist or Dr. Asha" onkeydown="if(event.key==='Enter') searchDoctors()">
+              <button type="button" class="btn btn-secondary" onclick="searchDoctors()">Search</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Doctor Cards Grid -->
+        <div id="doctorsContainer">
+          <p style="color: var(--text-muted); padding: 1rem 0;">Loading doctors...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Pick Date & Slot -->
+    <div class="card" id="slotCard" style="display: none;">
+      <div class="card-header">
+        <h2 class="card-title">2. Select Date & Time Slot</h2>
+        <span id="selectedDoctorName" style="font-weight: 600; color: var(--primary);"></span>
+      </div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group" style="max-width: 260px;">
+            <label class="form-label" for="appointmentDate">Appointment Date <span class="required">*</span></label>
+            <input type="date" id="appointmentDate" class="form-control" onchange="fetchSlots()">
+          </div>
+        </div>
+
+        <div style="margin-top: 0.75rem;">
+          <label class="form-label">Available Time Slots <span class="required">*</span></label>
+          <div id="slotsMessage" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+            Select a date above to view time slots.
+          </div>
+          <div id="slotsContainer" class="slots-container"></div>
+        </div>
+
+        <!-- Step 3: Reason & Confirmation -->
+        <div style="margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1.25rem;">
+          <div class="form-group">
+            <label class="form-label" for="reason">Reason for Visit / Symptoms (Optional)</label>
+            <textarea id="reason" class="form-control" placeholder="Briefly describe your symptoms or reason for consultation..." rows="2"></textarea>
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 1.25rem; flex-wrap: wrap; gap: 1rem;">
+            <div id="bookingSummary" style="font-size: 0.875rem; color: var(--secondary);"></div>
+            <button type="button" id="bookBtn" class="btn btn-primary" onclick="confirmBooking()" disabled>
+              Confirm Appointment Booking
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    let selectedDoctor = null;
+    let selectedTime = null;
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Patient')) return;
+      renderNavbar('book');
+
+      // Set min date on date picker to today
+      const todayStr = new Date().toISOString().split('T')[0];
+      const dateInput = document.getElementById('appointmentDate');
+      dateInput.min = todayStr;
+      dateInput.value = todayStr;
+
+      await loadDepartments();
+      await searchDoctors();
+    });
+
+    async function loadDepartments() {
+      const select = document.getElementById('deptFilter');
+      try {
+        const depts = await apiFetch('/api/departments');
+        if (Array.isArray(depts)) {
+          select.innerHTML = '<option value="">All Departments</option>' +
+            depts.map(d => `<option value="${d.DeptID}">${escapeHtml(d.DeptName)}</option>`).join('');
+        }
+      } catch (err) {
+        console.error('Failed to load departments', err);
+      }
+    }
+
+    async function searchDoctors() {
+      clearMessage('alertBox');
+      const deptId = document.getElementById('deptFilter').value;
+      const query = document.getElementById('searchQuery').value.trim();
+      const container = document.getElementById('doctorsContainer');
+
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 1rem 0;">Searching doctors...</p>';
+
+      const params = new URLSearchParams();
+      if (deptId) params.append('DeptID', deptId);
+      if (query) params.append('q', query);
+
+      try {
+        const doctors = await apiFetch(`/api/doctors?${params.toString()}`);
+        if (!Array.isArray(doctors) || doctors.length === 0) {
+          container.innerHTML = '<p style="color: var(--text-muted); padding: 1.5rem 0; text-align: center;">No doctors found matching criteria.</p>';
+          return;
+        }
+
+        container.innerHTML = `
+          <div class="doctor-cards-grid">
+            ${doctors.map(d => `
+              <div class="doctor-card ${selectedDoctor && selectedDoctor.DoctorID === d.DoctorID ? 'selected' : ''}"
+                   onclick="selectDoctor(${JSON.stringify(d).replace(/"/g, '&quot;')})">
+                <div class="doctor-card-name">👨‍⚕️ ${escapeHtml(d.Name)}</div>
+                <div class="doctor-card-spec">${escapeHtml(d.Specialization)}</div>
+                <div style="font-size: 0.8rem; color: var(--secondary);">Department: ${escapeHtml(d.DeptName || '-')}</div>
+                <div class="doctor-card-meta">
+                  <span>Fee: <strong>${formatCurrency(d.ConsultationFee)}</strong></span>
+                  <span style="color: var(--primary); font-weight: 500;">Select &rarr;</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      } catch (err) {
+        container.innerHTML = `<p style="color: var(--error);">Error searching doctors: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    function selectDoctor(doctor) {
+      selectedDoctor = doctor;
+      selectedTime = null;
+      updateBookingButton();
+
+      // Highlight selected card
+      document.querySelectorAll('.doctor-card').forEach(c => c.classList.remove('selected'));
+      event.currentTarget.classList.add('selected');
+
+      // Show slot selection card
+      const slotCard = document.getElementById('slotCard');
+      slotCard.style.display = 'block';
+      document.getElementById('selectedDoctorName').textContent = `${doctor.Name} (${doctor.Specialization}) - Fee: ${formatCurrency(doctor.ConsultationFee)}`;
+
+      slotCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      fetchSlots();
+    }
+
+    async function fetchSlots() {
+      if (!selectedDoctor) return;
+      const dateVal = document.getElementById('appointmentDate').value;
+      const container = document.getElementById('slotsContainer');
+      const msg = document.getElementById('slotsMessage');
+
+      selectedTime = null;
+      updateBookingButton();
+
+      if (!dateVal) {
+        msg.textContent = 'Please choose a valid date.';
+        container.innerHTML = '';
+        return;
+      }
+
+      msg.textContent = 'Checking doctor timetable and availability...';
+      container.innerHTML = '';
+
+      try {
+        const slots = await apiFetch(`/api/doctors/${selectedDoctor.DoctorID}/slots?date=${dateVal}`);
+        if (!Array.isArray(slots) || slots.length === 0) {
+          msg.textContent = 'No slots scheduled for this doctor on the selected date (doctor may not be on duty).';
+          return;
+        }
+
+        const availableCount = slots.filter(s => s.available).length;
+        msg.textContent = `Found ${slots.length} total slots (${availableCount} available). Choose your preferred time:`;
+
+        container.innerHTML = slots.map(s => {
+          const formatted = formatTime(s.time);
+          const isAvail = Boolean(s.available);
+          return `
+            <button type="button"
+                    class="slot-btn"
+                    ${!isAvail ? 'disabled title="Slot already booked or passed"' : ''}
+                    onclick="selectSlot('${escapeHtml(s.time)}', this)">
+              ${escapeHtml(formatted)}
+              <div style="font-size: 0.675rem; color: ${isAvail ? 'var(--success)' : 'var(--text-muted)'};">
+                ${isAvail ? 'Available' : 'Booked'}
+              </div>
+            </button>
+          `;
+        }).join('');
+      } catch (err) {
+        msg.textContent = 'Failed to load time slots: ' + err.message;
+      }
+    }
+
+    function selectSlot(timeStr, btnElement) {
+      selectedTime = timeStr;
+      document.querySelectorAll('.slot-btn').forEach(b => b.classList.remove('selected'));
+      btnElement.classList.add('selected');
+      updateBookingButton();
+    }
+
+    function updateBookingButton() {
+      const bookBtn = document.getElementById('bookBtn');
+      const summary = document.getElementById('bookingSummary');
+      const dateVal = document.getElementById('appointmentDate').value;
+
+      if (selectedDoctor && selectedTime && dateVal) {
+        bookBtn.disabled = false;
+        summary.innerHTML = `Booking with <strong>${escapeHtml(selectedDoctor.Name)}</strong> on <strong>${formatDate(dateVal)}</strong> at <strong>${formatTime(selectedTime)}</strong>`;
+      } else {
+        bookBtn.disabled = true;
+        summary.textContent = 'Please select a doctor, date, and available time slot.';
+      }
+    }
+
+    async function confirmBooking() {
+      clearMessage('alertBox');
+      const dateVal = document.getElementById('appointmentDate').value;
+      const reasonVal = document.getElementById('reason').value.trim() || null;
+      const bookBtn = document.getElementById('bookBtn');
+
+      if (!selectedDoctor || !selectedTime || !dateVal) {
+        showMessage('alertBox', 'warning', 'Please pick a doctor, date and time slot.');
+        return;
+      }
+
+      bookBtn.disabled = true;
+      bookBtn.textContent = 'Reserving Slot...';
+
+      try {
+        const payload = {
+          DoctorID: selectedDoctor.DoctorID,
+          Date: dateVal,
+          Time: selectedTime,
+          Reason: reasonVal
+        };
+
+        const res = await apiFetch('/api/patient/appointments', {
+          method: 'POST',
+          body: payload
+        });
+
+        showMessage('alertBox', 'success',
+          `Appointment successfully booked! (ID: #${res.AppointmentID || ''}). You can view it in your appointments list.`);
+
+        // Clear slot and update button
+        selectedTime = null;
+        updateBookingButton();
+        document.getElementById('reason').value = '';
+
+        // Refresh slots so the booked slot is now disabled
+        await fetchSlots();
+
+        // Scroll up to alert
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || 'Failed to book appointment.');
+        bookBtn.disabled = false;
+        bookBtn.textContent = 'Confirm Appointment Booking';
+      }
+    }
+  </script>
+</body>
+</html>

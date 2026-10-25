@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Doctor Registration Approvals - Admin Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Doctor Registration Approvals</h1>
+        <p class="page-subtitle">Review credential applications from newly registered doctors</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="loadPendingDoctors()">🔄 Refresh</button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Pending Applications</h2>
+      </div>
+      <div class="card-body" id="approvalsContainer" style="padding: 0;">
+        <p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading pending registrations...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Admin')) return;
+      renderNavbar('approvals');
+      await loadPendingDoctors();
+    });
+
+    async function loadPendingDoctors() {
+      clearMessage('alertBox');
+      const container = document.getElementById('approvalsContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading pending registrations...</p>';
+
+      try {
+        const list = await apiFetch('/api/admin/pending-doctors');
+
+        const columns = [
+          { label: 'User ID', render: (_, r) => `<strong>#${r.UserID}</strong>` },
+          { label: 'Username', render: (_, r) => `<code>${escapeHtml(r.Username)}</code>` },
+          { label: 'Doctor Name', render: (_, r) => `<strong>🩺 Dr. ${escapeHtml(r.Name)}</strong>` },
+          { label: 'Specialization', render: (_, r) => escapeHtml(r.Specialization) },
+          { label: 'Department', render: (_, r) => escapeHtml(r.DeptName || '-') },
+          { label: 'Email', render: (_, r) => `<a href="mailto:${escapeHtml(r.Email)}">${escapeHtml(r.Email)}</a>` },
+          { label: 'Phone', render: (_, r) => escapeHtml(r.Phone || '-') },
+          {
+            label: 'Decision',
+            render: (_, r) => `
+              <div class="btn-group">
+                <button type="button" class="btn btn-success btn-sm" onclick="decideDoctor(${r.UserID}, 'approve', '${escapeHtml(r.Name)}')">
+                  ✓ Approve
+                </button>
+                <button type="button" class="btn btn-danger btn-sm" onclick="decideDoctor(${r.UserID}, 'reject', '${escapeHtml(r.Name)}')">
+                  &times; Reject
+                </button>
+              </div>
+            `
+          }
+        ];
+
+        container.innerHTML = renderTable(columns, list, { emptyText: 'No pending doctor applications. All accounts are up to date!' });
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Failed to fetch pending doctors: ' + err.message);
+        container.innerHTML = '<p style="color: var(--error); padding: 2rem; text-align: center;">Error loading requests.</p>';
+      }
+    }
+
+    async function decideDoctor(uid, decision, name) {
+      const verb = decision === 'approve' ? 'approve' : 'reject and remove';
+      if (!confirm(`Are you sure you want to ${verb} Dr. ${name}'s registration?`)) {
+        return;
+      }
+
+      clearMessage('alertBox');
+      try {
+        const res = await apiFetch(`/api/admin/users/${uid}/${decision}`, {
+          method: 'POST'
+        });
+
+        showMessage('alertBox', 'success', res.message || `Account ${decision}d.`);
+        await loadPendingDoctors();
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || `Failed to ${decision} user.`);
+      }
+    }
+  </script>
+</body>
+</html>

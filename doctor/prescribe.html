@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Write Prescription - Doctor Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Prescribe Medications</h1>
+        <p class="page-subtitle">Formulate medical prescriptions with inventory stock verification</p>
+      </div>
+      <div>
+        <a href="patients.html" class="btn btn-outline btn-sm">View Patients</a>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Prescription Form Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">New Prescription</h2>
+      </div>
+      <div class="card-body">
+        <form id="rxForm" onsubmit="submitPrescription(event)">
+          <div class="form-row">
+            <div class="form-group" style="flex: 1; min-width: 260px;">
+              <label class="form-label" for="rxPatient">Select Patient <span class="required">*</span></label>
+              <select id="rxPatient" class="form-control" required>
+                <option value="">Loading your patients...</option>
+              </select>
+              <div class="form-help">Only patients with an active or previous consultation with you are eligible.</div>
+            </div>
+            <div class="form-group" style="flex: 2; min-width: 280px;">
+              <label class="form-label" for="rxNotes">Clinical Notes / Diagnosis / Advice</label>
+              <input type="text" id="rxNotes" class="form-control" placeholder="e.g. Mild viral fever; maintain hydration and rest.">
+            </div>
+          </div>
+
+          <!-- Dynamic Medicine Rows -->
+          <div style="margin-top: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <label class="form-label" style="margin: 0; font-weight: 600;">Medication Items <span class="required">*</span></label>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="addMedicineRow()">+ Add Medicine</button>
+            </div>
+
+            <div id="medicineRowsContainer">
+              <!-- Dynamically populated rows -->
+            </div>
+          </div>
+
+          <div style="margin-top: 1.5rem; display: flex; justify-content: flex-end; gap: 0.75rem;">
+            <button type="button" class="btn btn-outline" onclick="resetRxForm()">Reset Form</button>
+            <button type="submit" id="submitRxBtn" class="btn btn-primary">
+              Issue Prescription & Deduct Stock
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Previous Prescriptions Table -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Recently Issued Prescriptions</h2>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="loadPreviousPrescriptions()">🔄 Refresh</button>
+      </div>
+      <div class="card-body" id="rxHistoryContainer" style="padding: 0;">
+        <p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading previous prescriptions...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    let medicinesList = [];
+    let myPatientsList = [];
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Doctor')) return;
+      renderNavbar('prescribe');
+
+      await Promise.all([loadPatients(), loadMedicines()]);
+      addMedicineRow(); // start with one medicine row
+      await loadPreviousPrescriptions();
+
+      // Check query param for pre-selection (e.g. ?patientId=1)
+      const urlParams = new URLSearchParams(window.location.search);
+      const prePatientId = urlParams.get('patientId');
+      if (prePatientId) {
+        const select = document.getElementById('rxPatient');
+        select.value = prePatientId;
+      }
+    });
+
+    async function loadPatients() {
+      const select = document.getElementById('rxPatient');
+      try {
+        myPatientsList = await apiFetch('/api/doctor/patients');
+        if (!Array.isArray(myPatientsList) || myPatientsList.length === 0) {
+          select.innerHTML = '<option value="">No patients available (must have an appointment with you)</option>';
+          return;
+        }
+
+        select.innerHTML = '<option value="">Select a Patient</option>' +
+          myPatientsList.map(p =>
+            `<option value="${p.PatientID}">${escapeHtml(p.Name)} (ID: #${p.PatientID})</option>`
+          ).join('');
+      } catch (err) {
+        select.innerHTML = '<option value="">Failed to load patients</option>';
+      }
+    }
+
+    async function loadMedicines() {
+      try {
+        medicinesList = await apiFetch('/api/medicines');
+      } catch (err) {
+        console.error('Failed to load medicines catalog', err);
+      }
+    }
+
+    function addMedicineRow(medId = '', dosage = '', qty = 1) {
+      const container = document.getElementById('medicineRowsContainer');
+      const rowDiv = document.createElement('div');
+      rowDiv.className = 'dynamic-row';
+
+      const medOptions = (medicinesList || []).map(m => `
+        <option value="${m.MedicineID}" ${Number(medId) === m.MedicineID ? 'selected' : ''}>
+          ${escapeHtml(m.Name)} (Stock: ${m.Stock}) - ₹${m.Price}
+        </option>
+      `).join('');
+
+      rowDiv.innerHTML = `
+        <div class="form-group" style="flex: 3; min-width: 220px;">
+          <select class="form-control rx-med-id" required>
+            <option value="">Select Medicine</option>
+            ${medOptions}
+          </select>
+        </div>
+        <div class="form-group" style="flex: 3; min-width: 180px;">
+          <input type="text" class="form-control rx-dosage" placeholder="Dosage (e.g. 1 tab twice daily)" value="${escapeHtml(dosage)}" required>
+        </div>
+        <div class="form-group" style="flex: 1; min-width: 90px;">
+          <input type="number" class="form-control rx-qty" min="1" value="${qty}" required placeholder="Qty">
+        </div>
+        <div class="form-group" style="min-width: 40px;">
+          <button type="button" class="btn btn-danger btn-sm" onclick="removeMedRow(this)" title="Remove item">
+            &times;
+          </button>
+        </div>
+      `;
+
+      container.appendChild(rowDiv);
+    }
+
+    function removeMedRow(btn) {
+      const rows = document.querySelectorAll('#medicineRowsContainer .dynamic-row');
+      if (rows.length <= 1) {
+        alert('Prescription must contain at least one medicine item.');
+        return;
+      }
+      btn.closest('.dynamic-row').remove();
+    }
+
+    function resetRxForm() {
+      document.getElementById('rxForm').reset();
+      document.getElementById('medicineRowsContainer').innerHTML = '';
+      addMedicineRow();
+      clearMessage('alertBox');
+    }
+
+    async function submitPrescription(e) {
+      e.preventDefault();
+      clearMessage('alertBox');
+
+      const patientId = document.getElementById('rxPatient').value;
+      const notes = document.getElementById('rxNotes').value.trim() || null;
+      const submitBtn = document.getElementById('submitRxBtn');
+
+      if (!patientId) {
+        showMessage('alertBox', 'warning', 'Please select a patient.');
+        return;
+      }
+
+      const rows = document.querySelectorAll('#medicineRowsContainer .dynamic-row');
+      const items = [];
+
+      for (const r of rows) {
+        const medSelect = r.querySelector('.rx-med-id');
+        const dosageInput = r.querySelector('.rx-dosage');
+        const qtyInput = r.querySelector('.rx-qty');
+
+        const mid = medSelect ? parseInt(medSelect.value, 10) : null;
+        const dose = dosageInput ? dosageInput.value.trim() : '';
+        const qty = qtyInput ? parseInt(qtyInput.value, 10) : 0;
+
+        if (!mid) {
+          showMessage('alertBox', 'error', 'Please choose a medicine for all rows.');
+          return;
+        }
+        if (qty <= 0) {
+          showMessage('alertBox', 'error', 'Medicine quantity must be at least 1.');
+          return;
+        }
+
+        items.push({
+          MedicineID: mid,
+          Dosage: dose || 'As directed',
+          Quantity: qty
+        });
+      }
+
+      if (items.length === 0) {
+        showMessage('alertBox', 'error', 'Add at least one medicine to the prescription.');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Saving Prescription...';
+
+      try {
+        const payload = {
+          PatientID: parseInt(patientId, 10),
+          Notes: notes,
+          items: items
+        };
+
+        const res = await apiFetch('/api/doctor/prescriptions', {
+          method: 'POST',
+          body: payload
+        });
+
+        showMessage('alertBox', 'success',
+          `Prescription #${res.PrescriptionID} successfully issued! Inventory stock has been automatically deducted.`);
+
+        resetRxForm();
+        await loadMedicines(); // refresh stock numbers
+        await loadPreviousPrescriptions();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch (err) {
+        // Displays 409 Insufficient Stock error clearly
+        showMessage('alertBox', 'error', err.message || 'Failed to issue prescription.');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Issue Prescription & Deduct Stock';
+      }
+    }
+
+    async function loadPreviousPrescriptions() {
+      const container = document.getElementById('rxHistoryContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 1.5rem; text-align: center;">Loading...</p>';
+
+      try {
+        const list = await apiFetch('/api/doctor/prescriptions');
+
+        const columns = [
+          { label: 'Rx ID', render: (_, r) => `<strong>#${r.PrescriptionID}</strong>` },
+          { label: 'Patient Name', render: (_, r) => `<strong>👤 ${escapeHtml(r.PatientName || 'Patient #' + r.PatientID)}</strong>` },
+          { label: 'Date', render: (_, r) => formatDate(r.Date) },
+          { label: 'Clinical Notes', render: (_, r) => escapeHtml(r.Notes || '-') },
+          {
+            label: 'Medications Prescribed',
+            render: (_, r) => {
+              const its = r.items || [];
+              if (its.length === 0) return '<span style="color:var(--text-muted);">-</span>';
+              return its.map(it => `• <strong>${escapeHtml(it.Medicine)}</strong> (${it.Quantity}x) - ${escapeHtml(it.Dosage || '')}`).join('<br>');
+            }
+          }
+        ];
+
+        container.innerHTML = renderTable(columns, list, { emptyText: 'No prescriptions issued yet.' });
+      } catch (err) {
+        container.innerHTML = `<p style="color:var(--error); padding:1rem; text-align:center;">Failed to load history: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+  </script>
+</body>
+</html>

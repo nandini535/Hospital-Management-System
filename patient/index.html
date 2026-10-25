@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Patient Dashboard - Hospital Management System</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title" id="welcomeMsg">Welcome to Patient Portal</h1>
+        <p class="page-subtitle">Manage your consultations, prescriptions, admissions, and bills</p>
+      </div>
+      <div>
+        <a href="book.html" class="btn btn-primary">+ Book Appointment</a>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Quick Stats Grid -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Upcoming Consultations</div>
+        <div class="stat-value" id="statAppointments">-</div>
+        <div class="stat-subtext">Scheduled visits</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Pending Invoices</div>
+        <div class="stat-value" id="statPendingBills">-</div>
+        <div class="stat-subtext" id="statPendingAmount">Outstanding balance</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Prescriptions</div>
+        <div class="stat-value" id="statPrescriptions">-</div>
+        <div class="stat-subtext">Issued by doctors</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Admissions</div>
+        <div class="stat-value" id="statAdmissions">-</div>
+        <div class="stat-subtext">Hospital stays</div>
+      </div>
+    </div>
+
+    <!-- Quick Actions Grid -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Quick Actions</h2>
+      </div>
+      <div class="card-body">
+        <div class="quick-actions-grid">
+          <a href="book.html" class="action-card">
+            <div class="action-icon">📅</div>
+            <div class="action-title">Book Appointment</div>
+            <div class="action-desc">Search doctors and reserve a time slot</div>
+          </a>
+          <a href="appointments.html" class="action-card">
+            <div class="action-icon">📋</div>
+            <div class="action-title">My Appointments</div>
+            <div class="action-desc">Check upcoming visits and cancel if needed</div>
+          </a>
+          <a href="prescriptions.html" class="action-card">
+            <div class="action-icon">💊</div>
+            <div class="action-title">Prescriptions</div>
+            <div class="action-desc">View doctor notes and medicine dosages</div>
+          </a>
+          <a href="bills.html" class="action-card">
+            <div class="action-icon">💳</div>
+            <div class="action-title">Bills & Payments</div>
+            <div class="action-desc">Review charges and pay pending invoices</div>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Next Upcoming Appointment Preview -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Upcoming Appointments</h2>
+        <a href="appointments.html" class="btn btn-outline btn-sm">View All</a>
+      </div>
+      <div class="card-body" id="upcomingContainer">
+        <p style="color: var(--text-muted);">Loading appointments...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Patient')) return;
+      renderNavbar('dashboard');
+
+      const user = getUser();
+      if (user.name) {
+        document.getElementById('welcomeMsg').textContent = `Welcome back, ${user.name}!`;
+      }
+
+      await loadDashboardData();
+    });
+
+    async function loadDashboardData() {
+      try {
+        // Fetch appointments, bills, prescriptions, and admissions concurrently
+        const [appts, bills, rx, admits] = await Promise.all([
+          apiFetch('/api/patient/appointments').catch(() => []),
+          apiFetch('/api/patient/bills').catch(() => []),
+          apiFetch('/api/patient/prescriptions').catch(() => []),
+          apiFetch('/api/patient/admissions').catch(() => [])
+        ]);
+
+        // 1. Appointments stats
+        const scheduledAppts = appts.filter(a => a.Status === 'Scheduled');
+        document.getElementById('statAppointments').textContent = scheduledAppts.length;
+
+        // Render upcoming appointment preview
+        renderUpcomingPreview(scheduledAppts);
+
+        // 2. Bills stats
+        const pendingBills = bills.filter(b => b.Status === 'Pending');
+        const pendingTotal = pendingBills.reduce((acc, b) => acc + (parseFloat(b.Amount) || 0), 0);
+        document.getElementById('statPendingBills').textContent = pendingBills.length;
+        document.getElementById('statPendingAmount').textContent = pendingBills.length > 0
+          ? `${formatCurrency(pendingTotal)} to pay`
+          : 'All cleared';
+
+        // 3. Prescriptions count
+        document.getElementById('statPrescriptions').textContent = rx.length;
+
+        // 4. Admissions count
+        document.getElementById('statAdmissions').textContent = admits.length;
+
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Unable to load dashboard data: ' + err.message);
+      }
+    }
+
+    function renderUpcomingPreview(scheduledList) {
+      const container = document.getElementById('upcomingContainer');
+      if (!scheduledList || scheduledList.length === 0) {
+        container.innerHTML = `
+          <div style="text-align: center; padding: 1.5rem 0; color: var(--text-muted);">
+            <p>You have no scheduled appointments.</p>
+            <a href="book.html" class="btn btn-outline btn-sm" style="margin-top: 0.5rem;">Book a Consultation</a>
+          </div>
+        `;
+        return;
+      }
+
+      // Show top 3 scheduled appointments
+      const topItems = scheduledList.slice(0, 3);
+      const cols = [
+        { label: 'Doctor', render: (_, r) => `<strong>${escapeHtml(r.Doctor)}</strong> <span style="color:var(--text-muted);">(${escapeHtml(r.Specialization)})</span>` },
+        { label: 'Department', render: (_, r) => `${escapeHtml(r.DeptName)} <span style="font-size:0.75rem; color:var(--text-muted);">(${escapeHtml(r.Location || '')})</span>` },
+        { label: 'Date', render: (_, r) => formatDate(r.Date) },
+        { label: 'Time', render: (_, r) => formatTime(r.Time) },
+        { label: 'Status', render: (_, r) => statusBadge(r.Status) }
+      ];
+
+      container.innerHTML = renderTable(cols, topItems, { emptyText: 'No upcoming visits' });
+    }
+  </script>
+</body>
+</html>

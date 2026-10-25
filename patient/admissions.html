@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Admissions - Patient Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">My Hospital Admissions</h1>
+        <p class="page-subtitle">Track your inpatient stays, room allocations, and discharge dates</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="loadAdmissions()">
+          🔄 Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Admissions Table -->
+    <div id="admissionsContainer">
+      <p style="color: var(--text-muted); text-align: center; padding: 2rem 0;">Loading admissions history...</p>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Patient')) return;
+      renderNavbar('admissions');
+      await loadAdmissions();
+    });
+
+    async function loadAdmissions() {
+      clearMessage('alertBox');
+      const container = document.getElementById('admissionsContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 2rem 0;">Loading admissions history...</p>';
+
+      try {
+        const admissions = await apiFetch('/api/patient/admissions');
+
+        const columns = [
+          { label: 'Admission ID', render: (_, r) => `<strong>#${r.AdmissionID}</strong>` },
+          { label: 'Ward', render: (_, r) => `🏥 ${escapeHtml(r.WardName || '-')}` },
+          { label: 'Room', render: (_, r) => `Room #${r.RoomID} <span style="font-size:0.75rem; color:var(--text-muted);">(${escapeHtml(r.RoomType || '')})</span>` },
+          { label: 'Rate / Day', render: (_, r) => formatCurrency(r.RoomCharge) },
+          { label: 'Admit Date', render: (_, r) => formatDate(r.AdmitDate) },
+          {
+            label: 'Discharge Date',
+            render: (_, r) => r.DischargeDate
+              ? formatDate(r.DischargeDate)
+              : '<span class="badge badge-active">In Hospital</span>'
+          },
+          {
+            label: 'Status',
+            render: (_, r) => r.DischargeDate
+              ? '<span class="badge badge-completed">Discharged</span>'
+              : '<span class="badge badge-scheduled">Admitted</span>'
+          }
+        ];
+
+        container.innerHTML = renderTable(columns, admissions, { emptyText: 'No hospital stays recorded.' });
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Unable to fetch admissions: ' + err.message);
+        container.innerHTML = '<p style="color: var(--error); text-align: center;">Error loading records.</p>';
+      }
+    }
+  </script>
+</body>
+</html>

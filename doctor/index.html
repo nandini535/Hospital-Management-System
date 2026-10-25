@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Doctor Portal - Appointments</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title" id="doctorGreeting">Doctor Consultations & Schedule</h1>
+        <p class="page-subtitle">Manage patient consultations, mark completion, or review daily timetable</p>
+      </div>
+      <div>
+        <a href="prescribe.html" class="btn btn-primary">+ Write Prescription</a>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Summary Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Today's Appointments</div>
+        <div class="stat-value" id="statToday">-</div>
+        <div class="stat-subtext">Scheduled for today</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Upcoming Consultations</div>
+        <div class="stat-value" id="statUpcoming">-</div>
+        <div class="stat-subtext">Future visits</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Completed Consultations</div>
+        <div class="stat-value" id="statCompleted">-</div>
+        <div class="stat-subtext">Total treated</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">My Patients</div>
+        <div class="stat-value" id="statPatients">-</div>
+        <div class="stat-subtext"><a href="patients.html">View directory &rarr;</a></div>
+      </div>
+    </div>
+
+    <!-- Filters Card -->
+    <div class="card">
+      <div class="card-body" style="padding: 0.85rem 1.15rem;">
+        <div class="form-row" style="align-items: flex-end;">
+          <div class="form-group" style="min-width: 170px;">
+            <label class="form-label" for="filterDate">Filter Date</label>
+            <input type="date" id="filterDate" class="form-control" onchange="loadAppointments()">
+          </div>
+          <div class="form-group" style="min-width: 170px;">
+            <label class="form-label" for="filterStatus">Status</label>
+            <select id="filterStatus" class="form-control" onchange="loadAppointments()">
+              <option value="">All Statuses</option>
+              <option value="Scheduled" selected>Scheduled</option>
+              <option value="Completed">Completed</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </div>
+          <div class="form-group" style="min-width: 170px; display: flex; align-items: center; gap: 0.5rem; height: 38px;">
+            <input type="checkbox" id="filterUpcoming" onchange="loadAppointments()">
+            <label for="filterUpcoming" style="margin: 0; cursor: pointer; font-size: 0.85rem;">Upcoming Only</label>
+          </div>
+          <div class="form-group" style="display: flex; gap: 0.5rem;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="resetFilters()">Reset</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="loadAppointments()">🔄 Refresh</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Appointments Table Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Patient Consultations</h2>
+      </div>
+      <div class="card-body" id="appointmentsContainer" style="padding: 0;">
+        <p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading appointments...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Doctor')) return;
+      renderNavbar('dashboard');
+
+      const user = getUser();
+      if (user.name) {
+        document.getElementById('doctorGreeting').textContent = `${user.name} - Consultations`;
+      }
+
+      await loadStats();
+      await loadAppointments();
+    });
+
+    async function loadStats() {
+      try {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const [todayList, upcomingList, completedList, patientsList] = await Promise.all([
+          apiFetch(`/api/doctor/appointments?date=${todayStr}&status=Scheduled`).catch(() => []),
+          apiFetch('/api/doctor/appointments?upcoming=1&status=Scheduled').catch(() => []),
+          apiFetch('/api/doctor/appointments?status=Completed').catch(() => []),
+          apiFetch('/api/doctor/patients').catch(() => [])
+        ]);
+
+        document.getElementById('statToday').textContent = todayList.length;
+        document.getElementById('statUpcoming').textContent = upcomingList.length;
+        document.getElementById('statCompleted').textContent = completedList.length;
+        document.getElementById('statPatients').textContent = patientsList.length;
+      } catch (e) {
+        console.error('Failed to load stats', e);
+      }
+    }
+
+    async function loadAppointments() {
+      clearMessage('alertBox');
+      const container = document.getElementById('appointmentsContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading consultations...</p>';
+
+      const dateVal = document.getElementById('filterDate').value;
+      const statusVal = document.getElementById('filterStatus').value;
+      const upcomingVal = document.getElementById('filterUpcoming').checked;
+
+      const params = new URLSearchParams();
+      if (dateVal) params.append('date', dateVal);
+      if (statusVal) params.append('status', statusVal);
+      if (upcomingVal) params.append('upcoming', '1');
+
+      try {
+        const appts = await apiFetch(`/api/doctor/appointments?${params.toString()}`);
+
+        const columns = [
+          { label: 'ID', render: (_, r) => `<strong>#${r.AppointmentID}</strong>` },
+          {
+            label: 'Patient Name',
+            render: (_, r) => `
+              <strong>${escapeHtml(r.PatientName)}</strong>
+              <div style="font-size:0.75rem; color:var(--text-muted);">
+                ${escapeHtml(r.Gender || '-')}, DOB: ${formatDate(r.DOB)}
+              </div>
+            `
+          },
+          { label: 'Phone', render: (_, r) => escapeHtml(r.Phone || '-') },
+          { label: 'Date', render: (_, r) => formatDate(r.Date) },
+          { label: 'Time', render: (_, r) => formatTime(r.Time) },
+          { label: 'Reason / Symptoms', render: (_, r) => escapeHtml(r.Reason || '-') },
+          { label: 'Status', render: (_, r) => statusBadge(r.Status) },
+          {
+            label: 'Actions',
+            render: (_, r) => {
+              if (r.Status === 'Scheduled') {
+                return `
+                  <div class="btn-group">
+                    <button type="button" class="btn btn-success btn-sm" onclick="markAppointment(${r.AppointmentID}, 'complete')">
+                      ✓ Complete
+                    </button>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="markAppointment(${r.AppointmentID}, 'cancel')">
+                      Cancel
+                    </button>
+                    <a href="prescribe.html?patientId=${r.PatientID}&name=${encodeURIComponent(r.PatientName)}" class="btn btn-outline btn-sm">
+                      Rx
+                    </a>
+                  </div>
+                `;
+              }
+              if (r.Status === 'Completed') {
+                return `
+                  <a href="prescribe.html?patientId=${r.PatientID}&name=${encodeURIComponent(r.PatientName)}" class="btn btn-outline btn-sm">
+                    Write Rx
+                  </a>
+                `;
+              }
+              return '<span style="color:var(--text-muted); font-size:0.8rem;">-</span>';
+            }
+          }
+        ];
+
+        container.innerHTML = renderTable(columns, appts, { emptyText: 'No matching appointments found.' });
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Failed to load appointments: ' + err.message);
+        container.innerHTML = '<p style="color: var(--error); padding: 2rem; text-align: center;">Error loading data.</p>';
+      }
+    }
+
+    async function markAppointment(aid, action) {
+      const verb = action === 'complete' ? 'mark as completed' : 'cancel';
+      if (!confirm(`Are you sure you want to ${verb} appointment #${aid}?`)) {
+        return;
+      }
+
+      clearMessage('alertBox');
+      try {
+        const res = await apiFetch(`/api/doctor/appointments/${aid}/${action}`, {
+          method: 'POST'
+        });
+
+        showMessage('alertBox', 'success', res.message || `Appointment #${aid} updated.`);
+        await loadAppointments();
+        await loadStats();
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || `Failed to ${verb} appointment.`);
+      }
+    }
+
+    function resetFilters() {
+      document.getElementById('filterDate').value = '';
+      document.getElementById('filterStatus').value = '';
+      document.getElementById('filterUpcoming').checked = false;
+      loadAppointments();
+    }
+  </script>
+</body>
+</html>

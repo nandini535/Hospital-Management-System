@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Bills & Invoices - Patient Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">My Invoices & Bills</h1>
+        <p class="page-subtitle">View consultation fees, room stay invoices, and complete payments</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="loadBills()">
+          🔄 Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Outstanding Balance Summary Card -->
+    <div class="card" id="balanceCard" style="display: none;">
+      <div class="card-body" style="background: #fffbeb; border-radius: var(--radius); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <div style="font-size: 0.85rem; font-weight: 600; color: var(--warning);">Total Outstanding Balance</div>
+          <div style="font-size: 1.5rem; font-weight: 700; color: #92400e;" id="totalPendingAmount">₹0.00</div>
+        </div>
+        <div style="font-size: 0.8rem; color: #92400e;">
+          Please settle any pending bills to ensure uninterrupted hospital care.
+        </div>
+      </div>
+    </div>
+
+    <!-- Bills Table -->
+    <div id="billsTableContainer">
+      <p style="color: var(--text-muted); text-align: center; padding: 2rem 0;">Loading bills...</p>
+    </div>
+  </div>
+
+  <!-- Payment Modal Dialog -->
+  <div class="modal-backdrop" id="paymentModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Pay Hospital Bill</h3>
+        <button type="button" class="modal-close" onclick="closePaymentModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="modalAlertBox"></div>
+
+        <div style="background: #f8fafc; padding: 0.85rem; border-radius: var(--radius-sm); margin-bottom: 1rem; border: 1px solid var(--border-color);">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem;">
+            <span style="color: var(--text-muted);">Invoice:</span>
+            <strong id="modalBillId">-</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem;">
+            <span style="color: var(--text-muted);">Service:</span>
+            <span id="modalBillType">-</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 1.1rem; border-top: 1px dashed var(--border-color); padding-top: 0.4rem; margin-top: 0.4rem;">
+            <strong style="color: var(--text-main);">Amount Payable:</strong>
+            <strong style="color: var(--primary);" id="modalAmount">-</strong>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="paymentMode">Select Payment Method <span class="required">*</span></label>
+          <select id="paymentMode" class="form-control">
+            <option value="UPI" selected>UPI (GPay / PhonePe / Paytm)</option>
+            <option value="Card">Debit / Credit Card</option>
+            <option value="Cash">Cash (Hospital Counter)</option>
+            <option value="Insurance">Health Insurance TPA</option>
+          </select>
+          <div class="form-help">Note: Payment processing is securely simulated for this system.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="closePaymentModal()">Cancel</button>
+        <button type="button" id="confirmPayBtn" class="btn btn-success" onclick="processPayment()">
+          Confirm & Pay
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    let currentPayingBill = null;
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Patient')) return;
+      renderNavbar('bills');
+      await loadBills();
+    });
+
+    async function loadBills() {
+      clearMessage('alertBox');
+      const container = document.getElementById('billsTableContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 2rem 0;">Loading bills...</p>';
+
+      try {
+        const bills = await apiFetch('/api/patient/bills');
+
+        // Calculate pending balance
+        const pendingBills = bills.filter(b => b.Status === 'Pending');
+        const pendingTotal = pendingBills.reduce((sum, b) => sum + (parseFloat(b.Amount) || 0), 0);
+
+        const balanceCard = document.getElementById('balanceCard');
+        if (pendingBills.length > 0) {
+          balanceCard.style.display = 'block';
+          document.getElementById('totalPendingAmount').textContent = formatCurrency(pendingTotal);
+        } else {
+          balanceCard.style.display = 'none';
+        }
+
+        const columns = [
+          { label: 'Bill ID', render: (_, r) => `<strong>#${r.BillID}</strong>` },
+          { label: 'Description', render: (_, r) => escapeHtml(r.BillType || (r.AdmissionID ? 'Hospital stay' : (r.AppointmentID ? 'Doctor consultation' : 'Hospital Service'))) },
+          { label: 'Date', render: (_, r) => formatDate(r.Date) },
+          { label: 'Amount', render: (_, r) => `<strong>${formatCurrency(r.Amount)}</strong>` },
+          { label: 'Payment Mode', render: (_, r) => r.PaymentMode ? `<span style="font-size:0.85rem;">💳 ${escapeHtml(r.PaymentMode)}</span>` : '<span style="color:var(--text-muted);">-</span>' },
+          { label: 'Status', render: (_, r) => statusBadge(r.Status) },
+          {
+            label: 'Action',
+            render: (_, r) => {
+              if (r.Status === 'Pending') {
+                return `
+                  <button type="button" class="btn btn-success btn-sm"
+                          onclick="openPaymentModal(${JSON.stringify(r).replace(/"/g, '&quot;')})">
+                    Pay Now
+                  </button>
+                `;
+              }
+              return '<span style="color: var(--success); font-size: 0.8rem; font-weight: 500;">✓ Settled</span>';
+            }
+          }
+        ];
+
+        container.innerHTML = renderTable(columns, bills, { emptyText: 'No bills found on record.' });
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Unable to fetch bills: ' + err.message);
+        container.innerHTML = '<p style="color: var(--error); text-align: center;">Error loading bills.</p>';
+      }
+    }
+
+    function openPaymentModal(bill) {
+      currentPayingBill = bill;
+      clearMessage('modalAlertBox');
+
+      document.getElementById('modalBillId').textContent = '#' + bill.BillID;
+      document.getElementById('modalBillType').textContent = bill.BillType || (bill.AdmissionID ? 'Hospital Stay' : 'Consultation');
+      document.getElementById('modalAmount').textContent = formatCurrency(bill.Amount);
+      document.getElementById('paymentMode').value = 'UPI';
+
+      const btn = document.getElementById('confirmPayBtn');
+      btn.disabled = false;
+      btn.textContent = 'Confirm & Pay ' + formatCurrency(bill.Amount);
+
+      document.getElementById('paymentModal').classList.add('show');
+    }
+
+    function closePaymentModal() {
+      currentPayingBill = null;
+      document.getElementById('paymentModal').classList.remove('show');
+    }
+
+    async function processPayment() {
+      if (!currentPayingBill) return;
+      clearMessage('modalAlertBox');
+
+      const mode = document.getElementById('paymentMode').value;
+      const btn = document.getElementById('confirmPayBtn');
+      btn.disabled = true;
+      btn.textContent = 'Processing Payment...';
+
+      try {
+        const res = await apiFetch(`/api/patient/bills/${currentPayingBill.BillID}/pay`, {
+          method: 'POST',
+          body: { PaymentMode: mode }
+        });
+
+        closePaymentModal();
+        showMessage('alertBox', 'success', res.message || `Payment of ${formatCurrency(currentPayingBill.Amount)} received successfully!`);
+        await loadBills();
+      } catch (err) {
+        showMessage('modalAlertBox', 'error', err.message || 'Payment simulation failed.');
+        btn.disabled = false;
+        btn.textContent = 'Confirm & Pay';
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard - Hospital Management System</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Hospital Operations Dashboard</h1>
+        <p class="page-subtitle">Real-time facility utilization, revenue metrics, and staffing overview</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="loadDashboard()">🔄 Refresh</button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- 8 Main Stats Cards -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Total Patients</div>
+        <div class="stat-value" id="statPatients">-</div>
+        <div class="stat-subtext"><a href="patients.html">Search directory &rarr;</a></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Doctors on Staff</div>
+        <div class="stat-value" id="statDoctors">-</div>
+        <div class="stat-subtext"><a href="master.html">Manage doctors &rarr;</a></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Appointments Today</div>
+        <div class="stat-value" id="statApptsToday">-</div>
+        <div class="stat-subtext"><a href="appointments.html">View schedule &rarr;</a></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Currently Admitted</div>
+        <div class="stat-value" id="statAdmitted">-</div>
+        <div class="stat-subtext"><a href="admissions.html">Inpatient census &rarr;</a></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Rooms Available</div>
+        <div class="stat-value" id="statRoomsAvail">-</div>
+        <div class="stat-subtext"><a href="admissions.html">Room allocation &rarr;</a></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Doctor Approvals</div>
+        <div class="stat-value" id="statPendingApprovals" style="color: var(--warning);">-</div>
+        <div class="stat-subtext"><a href="approvals.html">Review requests &rarr;</a></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Revenue Collected</div>
+        <div class="stat-value" id="statRevPaid" style="color: var(--success);">-</div>
+        <div class="stat-subtext">Settled payments</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Revenue Pending</div>
+        <div class="stat-value" id="statRevPending" style="color: var(--error);">-</div>
+        <div class="stat-subtext"><a href="billing.html">View pending bills &rarr;</a></div>
+      </div>
+    </div>
+
+    <!-- Quick Navigation Hub -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Hospital Administration Modules</h2>
+      </div>
+      <div class="card-body">
+        <div class="quick-actions-grid">
+          <a href="approvals.html" class="action-card">
+            <div class="action-icon">🩺</div>
+            <div class="action-title">Doctor Approvals</div>
+            <div class="action-desc">Review pending registrations</div>
+          </a>
+          <a href="users.html" class="action-card">
+            <div class="action-icon">👥</div>
+            <div class="action-title">User Accounts</div>
+            <div class="action-desc">Enable or disable system logins</div>
+          </a>
+          <a href="patients.html" class="action-card">
+            <div class="action-icon">🔍</div>
+            <div class="action-title">Patient Records</div>
+            <div class="action-desc">Fast search & complete clinical history</div>
+          </a>
+          <a href="appointments.html" class="action-card">
+            <div class="action-icon">📅</div>
+            <div class="action-title">Appointments & Walk-ins</div>
+            <div class="action-desc">Calendar & reception booking</div>
+          </a>
+          <a href="admissions.html" class="action-card">
+            <div class="action-icon">🛏️</div>
+            <div class="action-title">Admissions & Rooms</div>
+            <div class="action-desc">Admit, discharge, & room allocation</div>
+          </a>
+          <a href="billing.html" class="action-card">
+            <div class="action-icon">💳</div>
+            <div class="action-title">Billing & Collections</div>
+            <div class="action-desc">Generate bills & record settlements</div>
+          </a>
+          <a href="medicines.html" class="action-card">
+            <div class="action-icon">💊</div>
+            <div class="action-title">Pharmacy Inventory</div>
+            <div class="action-desc">Medicine stock & pricing</div>
+          </a>
+          <a href="master.html" class="action-card">
+            <div class="action-icon">⚙️</div>
+            <div class="action-title">Master Data CRUD</div>
+            <div class="action-desc">Departments, Wards, Rooms, Nurses</div>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Low Stock Inventory Alert Table -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title" style="color: var(--error);">⚠️ Low Stock Medication Inventory</h2>
+        <a href="medicines.html" class="btn btn-outline btn-sm">Manage All Medicines</a>
+      </div>
+      <div class="card-body" id="lowStockContainer" style="padding: 0;">
+        <p style="color: var(--text-muted); padding: 1.5rem; text-align: center;">Checking pharmacy inventory...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Admin')) return;
+      renderNavbar('dashboard');
+      await loadDashboard();
+    });
+
+    async function loadDashboard() {
+      clearMessage('alertBox');
+      await Promise.all([loadStats(), loadLowStock()]);
+    }
+
+    async function loadStats() {
+      try {
+        const stats = await apiFetch('/api/stats');
+        document.getElementById('statPatients').textContent = stats.patients ?? 0;
+        document.getElementById('statDoctors').textContent = stats.doctors ?? 0;
+        document.getElementById('statApptsToday').textContent = stats.appointments_today ?? 0;
+        document.getElementById('statAdmitted').textContent = stats.currently_admitted ?? 0;
+        document.getElementById('statRoomsAvail').textContent = stats.rooms_available ?? 0;
+        document.getElementById('statPendingApprovals').textContent = stats.pending_doctor_approvals ?? 0;
+        document.getElementById('statRevPaid').textContent = formatCurrency(stats.revenue_collected);
+        document.getElementById('statRevPending').textContent = formatCurrency(stats.revenue_pending);
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Unable to fetch admin statistics: ' + err.message);
+      }
+    }
+
+    async function loadLowStock() {
+      const container = document.getElementById('lowStockContainer');
+      try {
+        const lowMeds = await apiFetch('/api/medicines/low-stock?threshold=20');
+
+        const columns = [
+          { label: 'Medicine ID', render: (_, r) => `<strong>#${r.MedicineID}</strong>` },
+          { label: 'Medicine Name', render: (_, r) => `<strong>💊 ${escapeHtml(r.Name)}</strong>` },
+          { label: 'Unit Price', render: (_, r) => formatCurrency(r.Price) },
+          {
+            label: 'Current Stock',
+            render: (_, r) => `
+              <span style="color: var(--error); font-weight: 700;">
+                ${r.Stock} units left
+              </span>
+            `
+          },
+          {
+            label: 'Status',
+            render: () => '<span class="badge badge-cancelled">Low Stock Alert</span>'
+          },
+          {
+            label: 'Action',
+            render: (_, r) => `
+              <a href="medicines.html" class="btn btn-secondary btn-sm">Restock</a>
+            `
+          }
+        ];
+
+        container.innerHTML = renderTable(columns, lowMeds, { emptyText: 'All medicines have sufficient inventory stock (> 20 units).' });
+      } catch (err) {
+        container.innerHTML = `<p style="color:var(--error); padding:1rem; text-align:center;">Failed to check stock: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+  </script>
+</body>
+</html>

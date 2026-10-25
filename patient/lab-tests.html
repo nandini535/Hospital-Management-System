@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Lab Tests - Patient Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">My Lab Tests</h1>
+        <p class="page-subtitle">Diagnostic lab investigations and medical pathology test reports</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="loadLabTests()">
+          🔄 Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Lab Tests Table -->
+    <div id="labTestsContainer">
+      <p style="color: var(--text-muted); text-align: center; padding: 2rem 0;">Loading lab tests...</p>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Patient')) return;
+      renderNavbar('lab-tests');
+      await loadLabTests();
+    });
+
+    async function loadLabTests() {
+      clearMessage('alertBox');
+      const container = document.getElementById('labTestsContainer');
+      container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 2rem 0;">Loading lab tests...</p>';
+
+      try {
+        const tests = await apiFetch('/api/patient/lab-tests');
+
+        const columns = [
+          { label: 'Test ID', render: (_, r) => `<strong>#${r.TestID}</strong>` },
+          { label: 'Investigation / Test Name', render: (_, r) => `<strong>🔬 ${escapeHtml(r.TestName)}</strong>` },
+          { label: 'Test Date', render: (_, r) => formatDate(r.TestDate) },
+          {
+            label: 'Status',
+            render: (_, r) => r.Result ? statusBadge('Completed') : statusBadge('Pending')
+          },
+          {
+            label: 'Laboratory Result',
+            render: (_, r) => r.Result
+              ? `<div style="background:#f1f5f9; padding:0.35rem 0.6rem; border-radius:var(--radius-sm); font-family:monospace; font-size:0.85rem;">${escapeHtml(r.Result)}</div>`
+              : '<span style="color: var(--text-muted); font-style: italic;">Awaiting clinical findings</span>'
+          }
+        ];
+
+        container.innerHTML = renderTable(columns, tests, { emptyText: 'No lab tests on record.' });
+      } catch (err) {
+        showMessage('alertBox', 'error', 'Unable to fetch lab tests: ' + err.message);
+        container.innerHTML = '<p style="color: var(--error); text-align: center;">Error loading lab tests.</p>';
+      }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Master Data Management - Admin Portal</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <div id="navbar"></div>
+
+  <div class="container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Hospital Master Data Management</h1>
+        <p class="page-subtitle">Unified generic CRUD controller for departments, doctors, wards, rooms, and nurses</p>
+      </div>
+      <div>
+        <button type="button" class="btn btn-primary" onclick="openAddModal()">
+          + Add New Record
+        </button>
+      </div>
+    </div>
+
+    <!-- Alert Box -->
+    <div id="alertBox"></div>
+
+    <!-- Master Resource Tabs -->
+    <div class="tabs">
+      <button type="button" class="tab-btn active" onclick="switchResource('departments', this)">🏢 Departments</button>
+      <button type="button" class="tab-btn" onclick="switchResource('doctors', this)">👨‍⚕️ Doctors</button>
+      <button type="button" class="tab-btn" onclick="switchResource('wards', this)">🏥 Wards</button>
+      <button type="button" class="tab-btn" onclick="switchResource('rooms', this)">🛏️ Rooms</button>
+      <button type="button" class="tab-btn" onclick="switchResource('nurses', this)">👩‍⚕️ Nurses</button>
+    </div>
+
+    <!-- Master Data Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title" id="resourceTitle">Departments Directory</h2>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="loadResourceData()">🔄 Refresh</button>
+      </div>
+      <div class="card-body" id="resourceContainer" style="padding: 0;">
+        <p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading resource data...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reusable Generic Add / Edit Modal -->
+  <div class="modal-backdrop" id="crudModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title" id="crudModalTitle">Add Record</h3>
+        <button type="button" class="modal-close" onclick="closeCrudModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="modalAlertBox"></div>
+        <form id="crudForm" onsubmit="handleSaveRecord(event)">
+          <div id="crudFormFields">
+            <!-- Dynamically populated input fields -->
+          </div>
+          <div class="modal-footer" style="padding-right:0; padding-bottom:0; margin-top:1.25rem;">
+            <button type="button" class="btn btn-secondary" onclick="closeCrudModal()">Cancel</button>
+            <button type="submit" id="saveRecordBtn" class="btn btn-primary">Save Record</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="../js/api.js"></script>
+  <script src="../js/auth.js"></script>
+  <script>
+    // Exact metadata from backend/tables.py
+    const RESOURCE_SCHEMA = {
+      departments: {
+        title: 'Departments',
+        pk: 'DeptID',
+        cols: ['DeptName', 'Location'],
+        types: { DeptName: 'text', Location: 'text' }
+      },
+      doctors: {
+        title: 'Doctors',
+        pk: 'DoctorID',
+        cols: ['Name', 'Specialization', 'Phone', 'Email', 'ConsultationFee', 'DeptID'],
+        types: { Name: 'text', Specialization: 'text', Phone: 'tel', Email: 'email', ConsultationFee: 'number', DeptID: 'number' }
+      },
+      wards: {
+        title: 'Wards',
+        pk: 'WardID',
+        cols: ['DeptID', 'WardName', 'Capacity', 'Status'],
+        types: { DeptID: 'number', WardName: 'text', Capacity: 'number', Status: 'select_ward_status' }
+      },
+      rooms: {
+        title: 'Rooms',
+        pk: 'RoomID',
+        cols: ['WardID', 'Type', 'Charge', 'Status'],
+        types: { WardID: 'number', Type: 'select_room_type', Charge: 'number', Status: 'select_room_status' }
+      },
+      nurses: {
+        title: 'Nurses',
+        pk: 'NurseID',
+        cols: ['Name', 'Phone', 'Shift', 'DeptID', 'WardID'],
+        types: { Name: 'text', Phone: 'tel', Shift: 'select_shift', DeptID: 'number', WardID: 'number' }
+      }
+    };
+
+    let activeResource = 'departments';
+    let currentRows = [];
+    let editingPkId = null;
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!requireAuth('Admin')) return;
+      renderNavbar('master');
+      await loadResourceData();
+    });
+
+    function switchResource(slug, tabElement) {
+      activeResource = slug;
+      document.querySelectorAll('.tabs .tab-btn').forEach(btn => btn.classList.remove('active'));
+      tabElement.classList.add('active');
+      document.getElementById('resourceTitle').textContent = RESOURCE_SCHEMA[slug].title + ' Directory';
+      loadResourceData();
+    }
+
+    async function loadResourceData() {
+      clearMessage('alertBox');
+      const container = document.getElementById('resourceContainer');
+      container.innerHTML = `<p style="color: var(--text-muted); padding: 2rem; text-align: center;">Loading ${activeResource}...</p>`;
+
+      const meta = RESOURCE_SCHEMA[activeResource];
+
+      try {
+        currentRows = await apiFetch(`/api/${activeResource}`);
+
+        // Construct dynamic columns from PK + cols
+        const columns = [
+          { label: meta.pk, render: (_, r) => `<strong>#${r[meta.pk]}</strong>` },
+          ...meta.cols.map(c => ({
+            label: c,
+            render: (val, r) => {
+              if (c === 'Charge' || c === 'ConsultationFee') return formatCurrency(r[c]);
+              if (c === 'Status') return statusBadge(r[c]);
+              return escapeHtml(r[c] !== undefined && r[c] !== null ? r[c] : '-');
+            }
+          })),
+          {
+            label: 'Actions',
+            render: (_, r) => `
+              <div class="btn-group">
+                <button type="button" class="btn btn-outline btn-sm" onclick="openEditModal(${r[meta.pk]})">
+                  Edit
+                </button>
+                <button type="button" class="btn btn-danger btn-sm" onclick="deleteRecord(${r[meta.pk]})">
+                  Delete
+                </button>
+              </div>
+            `
+          }
+        ];
+
+        container.innerHTML = renderTable(columns, currentRows, { emptyText: `No ${meta.title.toLowerCase()} records found.` });
+      } catch (err) {
+        showMessage('alertBox', 'error', `Failed to load ${activeResource}: ${err.message}`);
+        container.innerHTML = `<p style="color:var(--error); padding:2rem; text-align:center;">Error loading records.</p>`;
+      }
+    }
+
+    function renderDynamicFormFields(recordData = {}) {
+      const meta = RESOURCE_SCHEMA[activeResource];
+      const formFieldsContainer = document.getElementById('crudFormFields');
+
+      formFieldsContainer.innerHTML = meta.cols.map(col => {
+        const val = recordData[col] !== undefined && recordData[col] !== null ? recordData[col] : '';
+        const type = meta.types[col] || 'text';
+
+        let inputHtml = '';
+        if (type === 'select_ward_status') {
+          inputHtml = `
+            <select id="col_${col}" class="form-control" required>
+              <option value="Active" ${val === 'Active' ? 'selected' : ''}>Active</option>
+              <option value="Under Maintenance" ${val === 'Under Maintenance' ? 'selected' : ''}>Under Maintenance</option>
+            </select>
+          `;
+        } else if (type === 'select_room_status') {
+          inputHtml = `
+            <select id="col_${col}" class="form-control" required>
+              <option value="Available" ${val === 'Available' ? 'selected' : ''}>Available</option>
+              <option value="Occupied" ${val === 'Occupied' ? 'selected' : ''}>Occupied</option>
+              <option value="Maintenance" ${val === 'Maintenance' ? 'selected' : ''}>Maintenance</option>
+            </select>
+          `;
+        } else if (type === 'select_room_type') {
+          inputHtml = `
+            <select id="col_${col}" class="form-control" required>
+              <option value="General" ${val === 'General' ? 'selected' : ''}>General</option>
+              <option value="Semi-Private" ${val === 'Semi-Private' ? 'selected' : ''}>Semi-Private</option>
+              <option value="Private" ${val === 'Private' ? 'selected' : ''}>Private</option>
+              <option value="ICU" ${val === 'ICU' ? 'selected' : ''}>ICU</option>
+            </select>
+          `;
+        } else if (type === 'select_shift') {
+          inputHtml = `
+            <select id="col_${col}" class="form-control" required>
+              <option value="Morning" ${val === 'Morning' ? 'selected' : ''}>Morning</option>
+              <option value="Evening" ${val === 'Evening' ? 'selected' : ''}>Evening</option>
+              <option value="Night" ${val === 'Night' ? 'selected' : ''}>Night</option>
+            </select>
+          `;
+        } else {
+          inputHtml = `
+            <input type="${type}" id="col_${col}" class="form-control" value="${escapeHtml(val)}" required>
+          `;
+        }
+
+        return `
+          <div class="form-group">
+            <label class="form-label" for="col_${col}">${escapeHtml(col)} <span class="required">*</span></label>
+            ${inputHtml}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function openAddModal() {
+      editingPkId = null;
+      clearMessage('modalAlertBox');
+      const meta = RESOURCE_SCHEMA[activeResource];
+      document.getElementById('crudModalTitle').textContent = `Add New ${meta.title.slice(0, -1) || meta.title}`;
+      renderDynamicFormFields({});
+      document.getElementById('crudModal').classList.add('show');
+    }
+
+    function openEditModal(pkVal) {
+      editingPkId = pkVal;
+      clearMessage('modalAlertBox');
+      const meta = RESOURCE_SCHEMA[activeResource];
+      const record = currentRows.find(r => r[meta.pk] === pkVal) || {};
+      document.getElementById('crudModalTitle').textContent = `Edit ${meta.title.slice(0, -1)} (#${pkVal})`;
+      renderDynamicFormFields(record);
+      document.getElementById('crudModal').classList.add('show');
+    }
+
+    function closeCrudModal() {
+      editingPkId = null;
+      document.getElementById('crudModal').classList.remove('show');
+    }
+
+    async function handleSaveRecord(e) {
+      e.preventDefault();
+      clearMessage('modalAlertBox');
+
+      const meta = RESOURCE_SCHEMA[activeResource];
+      const payload = {};
+
+      for (const col of meta.cols) {
+        const input = document.getElementById(`col_${col}`);
+        if (!input) continue;
+        let v = input.value.trim();
+        if (meta.types[col] === 'number') {
+          v = parseFloat(v);
+        }
+        payload[col] = v;
+      }
+
+      const saveBtn = document.getElementById('saveRecordBtn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      try {
+        if (editingPkId) {
+          // Update record via PUT /api/<resource>/<id>
+          await apiFetch(`/api/${activeResource}/${editingPkId}`, {
+            method: 'PUT',
+            body: payload
+          });
+          showMessage('alertBox', 'success', `Record #${editingPkId} updated successfully.`);
+        } else {
+          // Create record via POST /api/<resource>
+          const res = await apiFetch(`/api/${activeResource}`, {
+            method: 'POST',
+            body: payload
+          });
+          const newId = res[meta.pk] || '';
+          showMessage('alertBox', 'success', `New record created successfully! (ID: #${newId})`);
+        }
+
+        closeCrudModal();
+        await loadResourceData();
+      } catch (err) {
+        showMessage('modalAlertBox', 'error', err.message || 'Operation failed.');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Record';
+      }
+    }
+
+    async function deleteRecord(pkVal) {
+      const meta = RESOURCE_SCHEMA[activeResource];
+      if (!confirm(`Are you sure you want to permanently delete ${meta.title.slice(0, -1)} #${pkVal}?`)) {
+        return;
+      }
+
+      clearMessage('alertBox');
+      try {
+        await apiFetch(`/api/${activeResource}/${pkVal}`, {
+          method: 'DELETE'
+        });
+
+        showMessage('alertBox', 'success', `Record #${pkVal} deleted successfully.`);
+        await loadResourceData();
+      } catch (err) {
+        showMessage('alertBox', 'error', err.message || 'Failed to delete record. (Ensure foreign key constraints permit removal)');
+      }
+    }
+  </script>
+</body>
+</html>
