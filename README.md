@@ -1,3 +1,4 @@
+backup-main
 # Hospital Management System - Frontend
 
 A clean, functional, plain HTML, CSS, and vanilla JavaScript frontend for the Hospital Management System DBMS course project.
@@ -65,3 +66,4 @@ You can open `index.html` directly in any web browser (Chrome, Firefox, Edge). A
 | **Admin** | `admin/billing.html` | Billing ledger & cashier settlement | `GET /api/bills`<br>`POST /api/bills/<id>/pay` |
 | **Admin** | `admin/medicines.html` | Medicine catalog stock & pricing CRUD | `GET /api/medicines`<br>`POST /api/medicines`<br>`PUT /api/medicines/<id>` |
 | **Admin** | `admin/master.html` | Unified CRUD for Departments, Doctors, Wards, Rooms, Nurses | `GET/POST /api/<resource>`<br>`PUT/DELETE /api/<resource>/<id>` |
+
